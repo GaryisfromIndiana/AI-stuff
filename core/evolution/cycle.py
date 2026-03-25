@@ -111,6 +111,17 @@ class EvolutionCycleManager:
         result.learnings = learnings
         self._feed_back_to_memory(learnings)
 
+        # 5. Prompt evolution — improve lieutenant system prompts
+        try:
+            from core.evolution.prompt_evolution import PromptEvolver
+            evolver = PromptEvolver(self.empire_id)
+            evolved = evolver.evolve_all()
+            if evolved:
+                learnings.append(f"Evolved prompts for {len(evolved)} lieutenant(s): {', '.join(e.lieutenant_name for e in evolved)}")
+                logger.info("Prompt evolution: %d lieutenants evolved", len(evolved))
+        except Exception as e:
+            logger.warning("Prompt evolution failed: %s", e)
+
         # Complete cycle
         result.duration_seconds = time.time() - start_time
         repo.complete_cycle(cycle.id, learnings=learnings, summary=f"Cycle {cycle.cycle_number}: {result.applied}/{result.proposals_collected} proposals applied")

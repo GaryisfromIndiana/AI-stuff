@@ -313,7 +313,23 @@ def api_run_evolution():
     from core.evolution.cycle import EvolutionCycleManager
     ecm = EvolutionCycleManager(empire_id)
     result = ecm.run_full_cycle()
-    return jsonify({"proposals": result.proposals_collected, "approved": result.approved, "applied": result.applied})
+    return jsonify({"proposals": result.proposals_collected, "approved": result.approved, "applied": result.applied, "learnings": result.learnings})
+
+
+@api_bp.route("/evolution/evolve-prompts", methods=["POST"])
+def api_evolve_prompts():
+    """Evolve lieutenant system prompts based on performance."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.evolution.prompt_evolution import PromptEvolver
+    evolver = PromptEvolver(empire_id)
+    evolved = evolver.evolve_all()
+    return jsonify({
+        "evolved_count": len(evolved),
+        "lieutenants": [
+            {"name": e.lieutenant_name, "confidence": e.confidence, "reasoning": e.reasoning[:200]}
+            for e in evolved
+        ],
+    })
 
 
 # ── Budget ─────────────────────────────────────────────────────────────

@@ -124,6 +124,12 @@ class Lieutenant:
         except Exception as e:
             logger.warning("[%s] Failed to extract knowledge: %s", self.name, e)
 
+        # Memory feedback: boost memories that contributed to good outcomes
+        try:
+            self._feedback_memories(task, result)
+        except Exception as e:
+            logger.debug("[%s] Memory feedback failed: %s", self.name, e)
+
         logger.info(
             "[%s] Task %s: %s (quality=%.2f, cost=$%.4f)",
             self.name, task.title,
@@ -322,18 +328,110 @@ class Lieutenant:
         )
 
     def _build_context(self, task: TaskInput) -> ACEContext:
-        """Build ACE context with persona, memories, and knowledge."""
-        # Get relevant memories
-        mem_context = self.memory.recall_for_context(self.id)
+        """Build ACE context with persona, task-relevant memories, and knowledge graph."""
+        task_query = f"{task.title} {task.description[:200]}"
+
+        # Get task-relevant memories using context window builder
+        memory_context = ""
+        try:
+            memory_context = self.memory.get_context_window(
+                query=task_query,
+                lieutenant_id=self.id,
+                token_budget=3000,
+                include_types=["semantic", "experiential", "design", "episodic"],
+            )
+        except Exception as e:
+            logger.debug("[%s] Memory context build failed: %s", self.name, e)
+
+        # Get relevant knowledge graph entities
+        knowledge_context = ""
+        try:
+            from core.knowledge.graph import KnowledgeGraph
+            graph = KnowledgeGraph(self.empire_id)
+
+            # Search for entities related to the task
+            entities = graph.find_entities(query=task_query[:100], limit=5)
+            if entities:
+                kg_parts = []
+                for entity in entities:
+                    neighbors = graph.get_neighbors(entity.name, max_depth=1)
+                    neighbor_names = [n.name for n in neighbors[:3]]
+                    entry = f"- {entity.name} ({entity.entity_type}): {entity.description[:150]}"
+                    if neighbor_names:
+                        entry += f" [related: {', '.join(neighbor_names)}]"
+                    kg_parts.append(entry)
+                knowledge_context = "## Knowledge Graph\n" + "\n".join(kg_parts)
+        except Exception as e:
+            logger.debug("[%s] Knowledge context build failed: %s", self.name, e)
+
+        # Build the full context
+        context_parts = [self.persona.build_system_prompt()]
+        context_parts.append(f"\nDomain: {self.domain}")
+
+        if memory_context:
+            context_parts.append(f"\n{memory_context}")
+        if knowledge_context:
+            context_parts.append(f"\n{knowledge_context}")
 
         context = ACEContext(
-            persona_prompt=self.persona.build_system_prompt(),
+            persona_prompt="\n".join(context_parts),
             domain_context=f"Domain: {self.domain}",
-            memories=[m.get("content", "")[:200] for m in mem_context.semantic[:5]],
-            knowledge=[m.get("content", "")[:200] for m in mem_context.experiential[:5]],
+            metadata={"task_query": task_query[:200]},
         )
 
         return context
+
+    def _feedback_memories(self, task: TaskInput, result: TaskResult) -> None:
+        """Update memory importance based on task outcome.
+
+        If a task succeeds with high quality, boost the memories that were
+        used in its context. If it fails, slightly reduce them.
+        This creates a reinforcement loop — useful memories get stronger.
+        """
+        task_query = f"{task.title} {task.description[:200]}"
+
+        # Find memories that were likely used in this task's context
+        related = self.memory.recall(
+            query=task_query,
+            memory_types=["semantic", "experiential"],
+            lieutenant_id=self.id,
+            limit=5,
+        )
+
+        if not related:
+            return
+
+        from db.engine import session_scope
+        from db.models import MemoryEntry
+
+        boost = 0.0
+        if result.success and result.quality_score >= 0.7:
+            boost = 0.05  # Good outcome → boost memories
+        elif result.success and result.quality_score >= 0.5:
+            boost = 0.02  # OK outcome → slight boost
+        elif not result.success:
+            boost = -0.03  # Failed → slight reduction
+
+        if boost == 0.0:
+            return
+
+        try:
+            with session_scope() as session:
+                for mem in related:
+                    mem_id = mem.get("id")
+                    if mem_id:
+                        db_mem = session.get(MemoryEntry, mem_id)
+                        if db_mem:
+                            new_importance = max(0.1, min(1.0, db_mem.importance_score + boost))
+                            db_mem.importance_score = new_importance
+                            db_mem.effective_importance = new_importance * db_mem.decay_factor
+
+            logger.debug(
+                "[%s] Memory feedback: %+.2f to %d memories (quality=%.2f)",
+                self.name, boost, len(related), result.quality_score,
+            )
+        except Exception:
+            pass  # Best-effort
 
     def _extract_knowledge(self, result: TaskResult) -> None:
         """Extract entities from task results into knowledge graph."""
