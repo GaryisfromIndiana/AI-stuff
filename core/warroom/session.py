@@ -90,11 +90,9 @@ class WarRoomSession:
         self._repo = None
 
     def _get_repo(self):
-        if self._repo is None:
-            from db.engine import get_session
-            session = get_session()
-            self._repo = session
-        return self._repo
+        """Get a fresh session."""
+        from db.engine import get_session
+        return get_session()
 
     def add_participant(self, lieutenant_id: str, name: str = "", domain: str = "") -> None:
         """Add a lieutenant participant."""

@@ -185,22 +185,37 @@ class DirectiveManager:
         # If no waves from planning, build default waves from the directive
         if not waves:
             logger.warning("No waves from War Room — building default task set")
-            description_parts = db_directive.description.split(",")
+            import re
+            description = db_directive.description
+
+            # Try splitting on numbered items: (1)...(2)... or 1)...2)...
+            numbered = re.split(r'\(\d+\)\s*', description)
+            if len(numbered) <= 2:
+                # Try splitting on sentences
+                numbered = [s.strip() for s in description.split(".") if len(s.strip()) > 20]
+
             default_tasks = []
-            for i, part in enumerate(description_parts[:6]):
-                part = part.strip().strip("()")
-                if len(part) > 10:
-                    default_tasks.append({"title": part[:100], "description": f"Research and analyze: {part}"})
+            for part in numbered:
+                part = part.strip().strip(",").strip()
+                if len(part) > 15:
+                    default_tasks.append({
+                        "title": part[:100],
+                        "description": f"Research and produce detailed analysis on: {part}",
+                    })
 
             if not default_tasks:
                 default_tasks = [{"title": db_directive.title, "description": db_directive.description}]
 
-            # Split into 2 waves
-            mid = max(1, len(default_tasks) // 2)
+            # Split into 2 waves (first wave slightly larger)
+            mid = max(1, (len(default_tasks) + 1) // 2)
             waves = [
                 {"wave_number": 1, "tasks": default_tasks[:mid]},
                 {"wave_number": 2, "tasks": default_tasks[mid:]},
             ]
+            # Remove empty waves
+            waves = [w for w in waves if w.get("tasks")]
+
+            logger.info("Built %d waves with %d tasks from directive", len(waves), len(default_tasks))
 
         wave_results = []
         total_cost = 0.0
@@ -216,39 +231,49 @@ class DirectiveManager:
                 assigned_lt = task_data.get("assigned_to", "")
                 lt = lt_manager.find_best_lieutenant(task_data.get("description", ""))
 
-                if lt:
-                    from core.ace.engine import TaskInput
-                    task = TaskInput(
-                        title=task_data.get("title", ""),
-                        description=task_data.get("description", ""),
-                    )
-                    result = lt.execute_task(task)
-                    wave_task_results.append(result.to_dict())
-                    total_cost += result.cost_usd
+                if not lt:
+                    logger.warning("No lieutenant found for task: %s", task_data.get("title", "?")[:50])
+                    wave_task_results.append({
+                        "title": task_data.get("title", ""),
+                        "success": False,
+                        "error": "No lieutenant available",
+                        "quality_score": 0,
+                        "cost_usd": 0,
+                    })
+                    continue
 
-                    # Record task in DB (best-effort)
-                    try:
-                        from db.models import Task as TaskModel
-                        from db.engine import session_scope
-                        with session_scope() as db_session:
-                            db_task = TaskModel(
-                                directive_id=directive_id,
-                                lieutenant_id=lt.id,
-                                title=task_data.get("title", "")[:256],
-                                description=task_data.get("description", "")[:5000],
-                                status="completed" if result.success else "failed",
-                                wave_number=wave_num,
-                                cost_usd=result.cost_usd,
-                                quality_score=result.quality_score,
-                                model_used=result.model_used,
-                                tokens_input=result.tokens_input,
-                                tokens_output=result.tokens_output,
-                                execution_time_seconds=result.execution_time_seconds,
-                                output_json={"content": result.content[:5000]},
-                            )
-                            db_session.add(db_task)
-                    except Exception as e:
-                        logger.warning("Failed to record task in DB: %s", e)
+                from core.ace.engine import TaskInput
+                task = TaskInput(
+                    title=task_data.get("title", ""),
+                    description=task_data.get("description", ""),
+                )
+                result = lt.execute_task(task)
+                wave_task_results.append(result.to_dict())
+                total_cost += result.cost_usd
+
+                # Record task in DB (best-effort)
+                try:
+                    from db.models import Task as TaskModel
+                    from db.engine import session_scope
+                    with session_scope() as db_session:
+                        db_task = TaskModel(
+                            directive_id=directive_id,
+                            lieutenant_id=lt.id,
+                            title=task_data.get("title", "")[:256],
+                            description=task_data.get("description", "")[:5000],
+                            status="completed" if result.success else "failed",
+                            wave_number=wave_num,
+                            cost_usd=result.cost_usd,
+                            quality_score=result.quality_score,
+                            model_used=result.model_used,
+                            tokens_input=result.tokens_input,
+                            tokens_output=result.tokens_output,
+                            execution_time_seconds=result.execution_time_seconds,
+                            output_json={"content": result.content[:5000]},
+                        )
+                        db_session.add(db_task)
+                except Exception as e:
+                    logger.warning("Failed to record task in DB: %s", e)
 
             wave_results.append({
                 "wave_number": wave_num,

@@ -232,6 +232,10 @@ class LieutenantManager:
 
         if best_lt:
             return self.get_lieutenant(best_lt.id)
+
+        # Fallback: return any active lieutenant
+        if active_lts:
+            return self.get_lieutenant(active_lts[0].id)
         return None
 
     def get_available_lieutenants(self, capabilities: list[str] | None = None) -> list[Lieutenant]:
