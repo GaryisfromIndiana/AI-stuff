@@ -298,7 +298,7 @@ def get_db_stats(engine: Engine | None = None) -> dict:
     try:
         with engine.connect() as conn:
             for table in stats["tables"]:
-                result = conn.execute(text(f"SELECT COUNT(*) FROM [{table}]"))
+                result = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"'))
                 stats[f"rows_{table}"] = result.scalar()
     except Exception as e:
         logger.warning("Could not get row counts: %s", e)
@@ -395,7 +395,7 @@ class DatabaseManager:
             Number of rows.
         """
         with self.engine.connect() as conn:
-            result = conn.execute(text(f"SELECT COUNT(*) FROM [{table_name}]"))
+            result = conn.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
             return result.scalar() or 0
 
     def vacuum(self) -> None:

@@ -75,7 +75,7 @@ class MigrationRunner:
                     checksum TEXT DEFAULT '',
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     rolled_back_at TIMESTAMP,
-                    is_current BOOLEAN DEFAULT 1
+                    is_current BOOLEAN DEFAULT TRUE
                 )
             """))
             conn.commit()
@@ -110,24 +110,35 @@ class MigrationRunner:
             """,
         ))
 
-        self.register(MigrationVersion(
-            version=3,
-            name="add_full_text_search",
-            description="Add FTS5 virtual tables for full-text search on key content",
-            sql_up="""
-                CREATE VIRTUAL TABLE IF NOT EXISTS fts_knowledge_entities
-                    USING fts5(name, description, content=knowledge_entities, content_rowid=rowid);
-                CREATE VIRTUAL TABLE IF NOT EXISTS fts_memory_entries
-                    USING fts5(title, content, summary, content=memory_entries, content_rowid=rowid);
-                CREATE VIRTUAL TABLE IF NOT EXISTS fts_tasks
-                    USING fts5(title, description, content=tasks, content_rowid=rowid);
-            """,
-            sql_down="""
-                DROP TABLE IF EXISTS fts_knowledge_entities;
-                DROP TABLE IF EXISTS fts_memory_entries;
-                DROP TABLE IF EXISTS fts_tasks;
-            """,
-        ))
+        # FTS is SQLite-only; Postgres uses built-in full-text search
+        is_sqlite = str(self.engine.url).startswith("sqlite")
+        if is_sqlite:
+            self.register(MigrationVersion(
+                version=3,
+                name="add_full_text_search",
+                description="Add FTS5 virtual tables (SQLite only)",
+                sql_up="""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS fts_knowledge_entities
+                        USING fts5(name, description, content=knowledge_entities, content_rowid=rowid);
+                    CREATE VIRTUAL TABLE IF NOT EXISTS fts_memory_entries
+                        USING fts5(title, content, summary, content=memory_entries, content_rowid=rowid);
+                    CREATE VIRTUAL TABLE IF NOT EXISTS fts_tasks
+                        USING fts5(title, description, content=tasks, content_rowid=rowid);
+                """,
+                sql_down="""
+                    DROP TABLE IF EXISTS fts_knowledge_entities;
+                    DROP TABLE IF EXISTS fts_memory_entries;
+                    DROP TABLE IF EXISTS fts_tasks;
+                """,
+            ))
+        else:
+            self.register(MigrationVersion(
+                version=3,
+                name="add_full_text_search",
+                description="Skip — Postgres uses built-in ILIKE",
+                sql_up="SELECT 1",
+                sql_down="SELECT 1",
+            ))
 
         self.register(MigrationVersion(
             version=4,
@@ -193,7 +204,7 @@ class MigrationRunner:
         """
         with self.engine.connect() as conn:
             result = conn.execute(text(
-                f"SELECT MAX(version) FROM {self.VERSION_TABLE} WHERE is_current = 1"
+                f"SELECT MAX(version) FROM {self.VERSION_TABLE} WHERE is_current = TRUE"
             ))
             row = result.fetchone()
             return row[0] if row and row[0] is not None else 0
@@ -206,7 +217,7 @@ class MigrationRunner:
         """
         with self.engine.connect() as conn:
             result = conn.execute(text(
-                f"SELECT version FROM {self.VERSION_TABLE} WHERE is_current = 1 ORDER BY version"
+                f"SELECT version FROM {self.VERSION_TABLE} WHERE is_current = TRUE ORDER BY version"
             ))
             return [row[0] for row in result.fetchall()]
 
@@ -262,13 +273,14 @@ class MigrationRunner:
                 # Execute SQL statements
                 for statement in migration.sql_up.strip().split(";"):
                     statement = statement.strip()
-                    if statement:
+                    # Skip empty statements and SQL comments
+                    if statement and not statement.startswith("--"):
                         conn.execute(text(statement))
 
             # Record the migration
             conn.execute(text(f"""
                 INSERT INTO {self.VERSION_TABLE} (version, name, description, checksum, is_current)
-                VALUES (:version, :name, :description, :checksum, 1)
+                VALUES (:version, :name, :description, :checksum, TRUE)
             """), {
                 "version": migration.version,
                 "name": migration.name,
@@ -323,7 +335,7 @@ class MigrationRunner:
 
             conn.execute(text(f"""
                 UPDATE {self.VERSION_TABLE}
-                SET is_current = 0, rolled_back_at = CURRENT_TIMESTAMP
+                SET is_current = FALSE, rolled_back_at = CURRENT_TIMESTAMP
                 WHERE version = :version
             """), {"version": migration.version})
             conn.commit()
