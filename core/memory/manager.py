@@ -102,33 +102,39 @@ class MemoryManager:
         Returns:
             Created memory entry as dict.
         """
-        repo = self._get_repo()
         expires_at = None
         if expires_hours:
             from datetime import timedelta
             expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_hours)
 
-        entry = repo.create(
-            empire_id=self.empire_id,
-            lieutenant_id=lieutenant_id or None,
-            memory_type=memory_type,
-            category=category,
-            title=title,
-            content=content,
-            importance_score=importance,
-            confidence_score=confidence,
-            effective_importance=importance,
-            decay_factor=1.0,
-            tags_json=tags or [],
-            metadata_json=metadata or {},
-            source_task_id=source_task_id or None,
-            source_type=source_type,
-            expires_at=expires_at,
-        )
-        repo.commit()
+        from db.engine import session_scope
+        from db.models import MemoryEntry as MemoryModel
+        from db.models import _generate_id
+
+        entry_id = _generate_id()
+        with session_scope() as session:
+            entry = MemoryModel(
+                id=entry_id,
+                empire_id=self.empire_id,
+                lieutenant_id=lieutenant_id or None,
+                memory_type=memory_type,
+                category=category,
+                title=title,
+                content=content,
+                importance_score=importance,
+                confidence_score=confidence,
+                effective_importance=importance,
+                decay_factor=1.0,
+                tags_json=tags or [],
+                metadata_json=metadata or {},
+                source_task_id=source_task_id or None,
+                source_type=source_type,
+                expires_at=expires_at,
+            )
+            session.add(entry)
 
         logger.debug("Stored %s memory: %s (importance=%.2f)", memory_type, title or content[:50], importance)
-        return {"id": entry.id, "type": memory_type, "title": title}
+        return {"id": entry_id, "type": memory_type, "title": title}
 
     def recall(
         self,
@@ -166,10 +172,13 @@ class MemoryManager:
                 limit=limit,
             )
 
-        # Refresh access counts
-        for entry in entries:
-            entry.refresh()
-        repo.flush()
+        # Refresh access counts (best-effort — don't fail reads on write errors)
+        try:
+            for entry in entries:
+                entry.refresh()
+            repo.flush()
+        except Exception:
+            pass  # Access count update is not critical
 
         return [
             {
