@@ -756,6 +756,95 @@ def api_sweep_discoveries():
     return jsonify(sweep.get_recent_discoveries(limit=int(request.args.get("limit", 20))))
 
 
+# ── Content Pipeline ───────────────────────────────────────────────────
+
+@api_bp.route("/content/generate", methods=["POST"])
+def api_generate_content():
+    """Generate formatted content on a topic.
+
+    Body: {"topic": "...", "template": "research_briefing", "context": "..."}
+    Templates: research_briefing, weekly_digest, deep_dive, competitive_analysis, status_report
+    """
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json()
+    topic = data.get("topic", "")
+    if not topic:
+        return jsonify({"error": "Topic required"}), 400
+
+    from core.content.generator import ContentGenerator
+    gen = ContentGenerator(empire_id)
+    content = gen.generate(
+        topic=topic,
+        template_name=data.get("template", "research_briefing"),
+        additional_context=data.get("context", ""),
+    )
+
+    return jsonify({
+        "title": content.title,
+        "template": content.template_used,
+        "sections": [
+            {"title": s.title, "content": s.content, "words": s.word_count}
+            for s in content.sections
+        ],
+        "total_words": content.total_words,
+        "cost_usd": content.total_cost,
+        "markdown": content.markdown,
+    })
+
+
+@api_bp.route("/content/from-directive/<directive_id>", methods=["POST"])
+def api_content_from_directive(directive_id: str):
+    """Generate formatted content from a completed directive."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json() or {}
+    from core.content.generator import ContentGenerator
+    gen = ContentGenerator(empire_id)
+    content = gen.generate_from_directive(
+        directive_id=directive_id,
+        template_name=data.get("template", "research_briefing"),
+    )
+    return jsonify({
+        "title": content.title,
+        "template": content.template_used,
+        "sections": [{"title": s.title, "content": s.content, "words": s.word_count} for s in content.sections],
+        "total_words": content.total_words,
+        "markdown": content.markdown,
+    })
+
+
+@api_bp.route("/content/status-report", methods=["POST"])
+def api_status_report():
+    """Generate an Empire status report."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.content.generator import ContentGenerator
+    gen = ContentGenerator(empire_id)
+    content = gen.generate_status_report()
+    return jsonify({
+        "title": content.title,
+        "sections": [{"title": s.title, "content": s.content, "words": s.word_count} for s in content.sections],
+        "total_words": content.total_words,
+        "markdown": content.markdown,
+    })
+
+
+@api_bp.route("/content/render/<directive_id>")
+def api_render_report(directive_id: str):
+    """Render a directive report as HTML page."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    template_name = request.args.get("template", "research_briefing")
+    from core.content.generator import ContentGenerator
+    gen = ContentGenerator(empire_id)
+    content = gen.generate_from_directive(directive_id, template_name)
+    return content.html, 200, {"Content-Type": "text/html"}
+
+
+@api_bp.route("/content/templates")
+def api_content_templates():
+    """List available content templates."""
+    from core.content.templates import list_templates
+    return jsonify(list_templates())
+
+
 @api_bp.route("/research", methods=["POST"])
 def api_research_topic():
     """Search, scrape, and synthesize research on a topic.
