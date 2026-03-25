@@ -130,6 +130,40 @@ class Lieutenant:
         except Exception as e:
             logger.debug("[%s] Memory feedback failed: %s", self.name, e)
 
+        # Update lieutenant DB record (performance, cost, last_active)
+        try:
+            from db.engine import session_scope
+            from db.models import Lieutenant as LtModel
+            from datetime import datetime, timezone as tz
+
+            with session_scope() as session:
+                db_lt = session.get(LtModel, self.id)
+                if db_lt:
+                    if result.success:
+                        db_lt.tasks_completed += 1
+                    else:
+                        db_lt.tasks_failed += 1
+                    db_lt.total_cost_usd += result.cost_usd
+                    db_lt.last_active_at = datetime.now(tz.utc)
+
+                    # Rolling average quality
+                    total = db_lt.tasks_completed + db_lt.tasks_failed
+                    if result.quality_score > 0 and total > 0:
+                        db_lt.avg_quality_score = (
+                            (db_lt.avg_quality_score * (total - 1) + result.quality_score) / total
+                        )
+
+                    # Recalculate performance score
+                    success_rate = db_lt.tasks_completed / total if total > 0 else 0.5
+                    quality_factor = db_lt.avg_quality_score if db_lt.avg_quality_score > 0 else 0.5
+                    db_lt.performance_score = min(1.0, success_rate * 0.4 + quality_factor * 0.6)
+
+                    db_lt.avg_execution_time = (
+                        (db_lt.avg_execution_time * (total - 1) + duration) / total
+                    ) if total > 0 else duration
+        except Exception as e:
+            logger.debug("[%s] Failed to update DB record: %s", self.name, e)
+
         logger.info(
             "[%s] Task %s: %s (quality=%.2f, cost=$%.4f)",
             self.name, task.title,
@@ -449,21 +483,37 @@ class Lieutenant:
 
             if extraction.entities:
                 from core.knowledge.graph import KnowledgeGraph
-                graph = KnowledgeGraph(self.empire_id)
+                from core.knowledge.resolution import EntityResolver
+                from core.knowledge.schemas import map_generic_type
 
-                # Add all entities first, track which names were added
+                graph = KnowledgeGraph(self.empire_id)
+                resolver = EntityResolver(self.empire_id)
+
+                # Add all entities with resolution and schema mapping
                 added_names = set()
                 for entity in extraction.entities:
                     name = entity.get("name", "").strip()
-                    if name:
-                        graph.add_entity(
-                            name=name,
-                            entity_type=entity.get("entity_type", "concept"),
-                            description=entity.get("description", ""),
-                            confidence=entity.get("confidence", 0.7),
-                            source_task_id=result.task_id,
-                        )
-                        added_names.add(name.lower())
+                    if not name:
+                        continue
+
+                    # Map generic type to schema type
+                    raw_type = entity.get("entity_type", "concept")
+                    mapped_type = map_generic_type(raw_type)
+
+                    # Resolve against existing entities (fuzzy dedup)
+                    resolution = resolver.resolve(name, mapped_type)
+                    if resolution.resolved and resolution.match and resolution.match.match_stage <= 2:
+                        # Exact or normalized match — update existing
+                        name = resolution.match.existing_name  # Use canonical name
+
+                    graph.add_entity(
+                        name=name,
+                        entity_type=mapped_type,
+                        description=entity.get("description", ""),
+                        confidence=entity.get("confidence", 0.7),
+                        source_task_id=result.task_id,
+                    )
+                    added_names.add(name.lower())
 
                 # Only create relations where both entities exist
                 for relation in extraction.relations:
