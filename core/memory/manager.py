@@ -434,3 +434,156 @@ class MemoryManager:
             )
             imported += 1
         return imported
+
+    def is_novel(self, content: str, threshold: float = 0.7) -> bool:
+        """Check if content is novel (not already known).
+
+        Searches existing memories for similar content. If a close match
+        is found, returns False (not novel).
+
+        Args:
+            content: Content to check.
+            threshold: Word overlap threshold (0-1). Higher = stricter.
+
+        Returns:
+            True if content is novel.
+        """
+        # Take key phrases from the content
+        words = set(content.lower().split()[:50])
+        if len(words) < 5:
+            return True  # Too short to compare
+
+        # Search for similar memories
+        search_query = " ".join(list(words)[:10])
+        existing = self.recall(query=search_query, limit=5)
+
+        for mem in existing:
+            existing_words = set(mem.get("content", "").lower().split()[:50])
+            if not existing_words:
+                continue
+
+            overlap = len(words & existing_words)
+            union = len(words | existing_words)
+            similarity = overlap / union if union > 0 else 0
+
+            if similarity >= threshold:
+                return False  # Already known
+
+        return True
+
+    def store_if_novel(
+        self,
+        content: str,
+        memory_type: str,
+        title: str = "",
+        novelty_threshold: float = 0.6,
+        **kwargs,
+    ) -> dict | None:
+        """Store a memory only if the content is novel.
+
+        Args:
+            content: Memory content.
+            memory_type: Memory type.
+            title: Memory title.
+            novelty_threshold: Similarity threshold for novelty check.
+            **kwargs: Additional args passed to store().
+
+        Returns:
+            Created memory dict, or None if duplicate.
+        """
+        if not self.is_novel(content, threshold=novelty_threshold):
+            logger.debug("Skipping duplicate memory: %s", title or content[:50])
+            return None
+
+        return self.store(content=content, memory_type=memory_type, title=title, **kwargs)
+
+    def get_context_window(
+        self,
+        query: str = "",
+        lieutenant_id: str = "",
+        token_budget: int = 4000,
+        include_types: list[str] | None = None,
+    ) -> str:
+        """Build a context string from memories that fits within a token budget.
+
+        Selects the most relevant and important memories, formats them
+        for LLM prompt injection, and ensures they fit within the budget.
+
+        Args:
+            query: Optional query for relevance filtering.
+            lieutenant_id: Lieutenant to get memories for.
+            token_budget: Maximum tokens worth of context.
+            include_types: Memory types to include. Defaults to all.
+
+        Returns:
+            Formatted context string ready for prompt injection.
+        """
+        chars_per_token = 4
+        char_budget = token_budget * chars_per_token
+
+        types = include_types or ["semantic", "experiential", "design", "episodic"]
+
+        # Get memories — prioritize by query relevance, then importance
+        all_memories = []
+        for mtype in types:
+            if query:
+                memories = self.recall(query=query, memory_types=[mtype], lieutenant_id=lieutenant_id, limit=10)
+            else:
+                memories = self.recall(memory_types=[mtype], lieutenant_id=lieutenant_id, limit=10)
+            all_memories.extend(memories)
+
+        # Sort by importance
+        all_memories.sort(key=lambda m: m.get("importance", 0), reverse=True)
+
+        # Build context within budget
+        sections = {
+            "semantic": ("Domain Knowledge", []),
+            "experiential": ("Lessons Learned", []),
+            "design": ("Design Patterns", []),
+            "episodic": ("Recent Context", []),
+        }
+
+        used_chars = 0
+        for mem in all_memories:
+            mtype = mem.get("type", "semantic")
+            content = mem.get("content", "")
+            title = mem.get("title", "")
+
+            # Truncate individual memory if needed
+            entry = f"- {title}: {content[:300]}" if title else f"- {content[:300]}"
+            entry_len = len(entry)
+
+            if used_chars + entry_len > char_budget:
+                break
+
+            if mtype in sections:
+                sections[mtype][1].append(entry)
+                used_chars += entry_len
+
+        # Format into sections
+        parts = []
+        for mtype, (header, entries) in sections.items():
+            if entries:
+                parts.append(f"## {header}\n" + "\n".join(entries))
+
+        return "\n\n".join(parts) if parts else ""
+
+    def get_memory_summary(self) -> str:
+        """Get a human-readable summary of what Empire knows.
+
+        Returns:
+            Summary string.
+        """
+        stats = self.get_stats()
+        total = stats.total_count
+        by_type = stats.by_type
+
+        if total == 0:
+            return "Empire has no memories yet."
+
+        parts = [f"Empire has {total} memories:"]
+        for mtype, data in by_type.items():
+            count = data.get("count", data) if isinstance(data, dict) else data
+            parts.append(f"  - {mtype}: {count}")
+
+        return "\n".join(parts)

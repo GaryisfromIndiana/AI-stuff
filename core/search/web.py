@@ -87,15 +87,18 @@ class WebSearcher:
         start = time.time()
 
         try:
-            kwargs: dict[str, Any] = {
-                "keywords": query,
-                "max_results": max_results,
-                "region": region,
-            }
-            if time_range:
-                kwargs["timelimit"] = time_range
-
-            raw_results = list(self._ddgs.text(**kwargs))
+            try:
+                # ddgs >= 8.0 API (positional query arg)
+                raw_results = list(self._ddgs.text(
+                    query, max_results=max_results, region=region,
+                    **({"timelimit": time_range} if time_range else {}),
+                ))
+            except TypeError:
+                # Fallback for older duckduckgo-search API
+                raw_results = list(self._ddgs.text(
+                    keywords=query, max_results=max_results, region=region,
+                    **({"timelimit": time_range} if time_range else {}),
+                ))
 
             results = [
                 SearchResult(
@@ -138,11 +141,14 @@ class WebSearcher:
             NewsSearchResponse.
         """
         try:
-            raw_results = list(self._ddgs.news(
-                keywords=query,
-                max_results=max_results,
-                timelimit=time_range,
-            ))
+            try:
+                raw_results = list(self._ddgs.news(
+                    query, max_results=max_results, timelimit=time_range,
+                ))
+            except TypeError:
+                raw_results = list(self._ddgs.news(
+                    keywords=query, max_results=max_results, timelimit=time_range,
+                ))
 
             results = [
                 NewsResult(

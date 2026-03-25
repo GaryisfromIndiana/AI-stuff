@@ -230,17 +230,27 @@ class WebScraper:
             # Store in memory
             from core.memory.manager import MemoryManager
             mm = MemoryManager(self.empire_id)
-            mm.store(
-                content=f"Source: {page.url}\nTitle: {page.title}\n\n{page.content[:5000]}",
-                memory_type="semantic",
-                title=f"Web: {page.title[:80]}" if page.title else f"Web: {page.domain}",
-                category="web_scrape",
-                importance=0.65,
-                tags=["web_scrape", page.domain],
-                source_type="web_scrape",
-                metadata={"url": url, "domain": page.domain, "author": page.author, "date": page.date},
-            )
-            stored_memories = 1
+
+            # Check if this URL was already stored
+            existing = mm.recall(query=page.url, memory_types=["semantic"], limit=1)
+            url_already_stored = any(page.url in m.get("content", "") for m in existing)
+
+            if url_already_stored:
+                logger.debug("URL already in memory: %s", page.url)
+                stored_memories = 0
+            else:
+                content_to_store = f"Source: {page.url}\nTitle: {page.title}\n\n{page.content[:5000]}"
+                mm.store(
+                    content=content_to_store,
+                    memory_type="semantic",
+                    title=f"Web: {page.title[:80]}" if page.title else f"Web: {page.domain}",
+                    category="web_scrape",
+                    importance=0.65,
+                    tags=["web_scrape", page.domain],
+                    source_type="web_scrape",
+                    metadata={"url": url, "domain": page.domain, "author": page.author, "date": page.date},
+                )
+                stored_memories = 1
 
             # Extract entities
             from core.knowledge.entities import EntityExtractor
