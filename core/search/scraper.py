@@ -45,12 +45,20 @@ class WebScraper:
     strips navigation, ads, and boilerplate, keeping the article text.
     """
 
-    def __init__(self, empire_id: str = ""):
+    def __init__(self, empire_id: str = "", use_cache: bool = True):
         self.empire_id = empire_id
         self._max_content_length = 15000  # chars
+        self._use_cache = use_cache
+        self._cache = None
+
+    def _get_cache(self):
+        if self._cache is None:
+            from core.search.cache import ScrapeCache
+            self._cache = ScrapeCache(self.empire_id)
+        return self._cache
 
     def scrape_url(self, url: str) -> ScrapedPage:
-        """Fetch and extract content from a URL.
+        """Fetch and extract content from a URL. Uses cache if available.
 
         Args:
             url: URL to scrape.
@@ -60,6 +68,22 @@ class WebScraper:
         """
         start = time.time()
         page = ScrapedPage(url=url, domain=self._extract_domain(url))
+
+        # Check cache first
+        if self._use_cache:
+            try:
+                cached = self._get_cache().get(url)
+                if cached:
+                    page.title = cached.title
+                    page.content = cached.content
+                    page.domain = cached.domain
+                    page.word_count = cached.word_count
+                    page.success = True
+                    page.fetch_time_ms = (time.time() - start) * 1000
+                    logger.debug("Cache hit: %s", page.domain)
+                    return page
+            except Exception:
+                pass
 
         try:
             # Download
@@ -107,6 +131,19 @@ class WebScraper:
             page.fetch_time_ms = (time.time() - start) * 1000
 
             logger.info("Scraped %s: %d words (%.0fms)", page.domain, page.word_count, page.fetch_time_ms)
+
+            # Store in cache
+            if self._use_cache:
+                try:
+                    self._get_cache().put(
+                        url=url,
+                        title=page.title,
+                        content=page.content,
+                        domain=page.domain,
+                        word_count=page.word_count,
+                    )
+                except Exception:
+                    pass
 
         except Exception as e:
             page.error = str(e)

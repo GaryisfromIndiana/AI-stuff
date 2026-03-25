@@ -550,20 +550,27 @@ def api_research_topic():
         else:
             scrape_failures.append({"url": url, "error": page.error or "too short"})
 
-    # 4. Build research context — scraped articles + snippet fallback
+    # 4. Build research context — scraped articles + snippet fallback + credibility
+    from core.search.credibility import CredibilityScorer
+    cred_scorer = CredibilityScorer()
+
     source_texts = []
     source_info = []
 
     for page in scraped:
-        source_texts.append(f"## {page.title}\nSource: {page.domain} | {page.date}\n\n{page.content[:3000]}")
-        source_info.append({"title": page.title, "url": page.url, "domain": page.domain, "words": page.word_count, "type": "scraped"})
+        cred = cred_scorer.score(page.url)
+        cred_label = cred_scorer.format_for_prompt(page.url)
+        source_texts.append(f"## {page.title}\nSource: {page.domain} | {page.date} {cred_label}\n\n{page.content[:3000]}")
+        source_info.append({"title": page.title, "url": page.url, "domain": page.domain, "words": page.word_count, "type": "scraped", "credibility": cred.score, "tier": cred.tier})
 
     # Fallback: if we didn't get enough scraped content, use search snippets
     if len(source_texts) < max_sources:
         snippet_sources = [r for r in all_results if r["url"] not in {s.url for s in scraped}]
         for r in snippet_sources[:max_sources - len(source_texts)]:
-            source_texts.append(f"## {r['title']}\nSource: {r['source']} (snippet only)\n\n{r['snippet']}")
-            source_info.append({"title": r["title"], "url": r["url"], "domain": r["source"], "words": len(r["snippet"].split()), "type": "snippet"})
+            cred = cred_scorer.score(r.get("url", ""))
+            cred_label = cred_scorer.format_for_prompt(r.get("url", ""))
+            source_texts.append(f"## {r['title']}\nSource: {r['source']} (snippet only) {cred_label}\n\n{r['snippet']}")
+            source_info.append({"title": r["title"], "url": r["url"], "domain": r["source"], "words": len(r["snippet"].split()), "type": "snippet", "credibility": cred.score, "tier": cred.tier})
 
     if not source_texts:
         return jsonify({"topic": topic, "success": False, "error": "No content available", "scrape_failures": scrape_failures})
@@ -624,3 +631,65 @@ Be specific and cite which source each finding comes from.
 
     except Exception as e:
         return jsonify({"topic": topic, "success": False, "error": str(e)}), 500
+
+
+# ── RSS Feeds ──────────────────────────────────────────────────────────
+
+@api_bp.route("/feeds")
+def api_list_feeds():
+    """List configured RSS feeds."""
+    from core.search.feeds import FeedReader
+    reader = FeedReader(current_app.config.get("EMPIRE_ID", ""))
+    return jsonify(reader.list_feeds())
+
+
+@api_bp.route("/feeds/latest")
+def api_feed_latest():
+    """Get latest entries from all feeds."""
+    category = request.args.get("category")
+    max_total = int(request.args.get("limit", 20))
+    from core.search.feeds import FeedReader
+    reader = FeedReader(current_app.config.get("EMPIRE_ID", ""))
+    entries = reader.fetch_latest(
+        categories=[category] if category else None,
+        max_total=max_total,
+    )
+    return jsonify([
+        {"title": e.title, "url": e.url, "summary": e.summary[:300],
+         "source": e.source_feed, "published": e.published, "tags": e.tags}
+        for e in entries
+    ])
+
+
+@api_bp.route("/feeds/sync", methods=["POST"])
+def api_feed_sync():
+    """Fetch all feeds and store new entries."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.search.feeds import FeedReader
+    reader = FeedReader(empire_id)
+    result = reader.fetch_and_store()
+    return jsonify(result)
+
+
+# ── Credibility ────────────────────────────────────────────────────────
+
+@api_bp.route("/credibility")
+def api_check_credibility():
+    """Check credibility of a URL."""
+    url = request.args.get("url", "")
+    if not url:
+        return jsonify({"error": "URL parameter required"}), 400
+    from core.search.credibility import CredibilityScorer
+    scorer = CredibilityScorer()
+    score = scorer.score(url)
+    return jsonify({
+        "url": url, "domain": score.domain, "score": score.score,
+        "tier": score.tier, "category": score.category, "reasoning": score.reasoning,
+    })
+
+
+@api_bp.route("/credibility/tiers")
+def api_credibility_tiers():
+    """Get all sources organized by tier."""
+    from core.search.credibility import get_source_tiers
+    return jsonify(get_source_tiers())
