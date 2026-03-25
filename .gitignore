@@ -8,3 +8,5 @@ dist/
 .venv/
 *.egg
 .DS_Store
+*.db-shm
+*.db-wal

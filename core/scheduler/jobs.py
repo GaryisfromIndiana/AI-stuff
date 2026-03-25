@@ -258,25 +258,27 @@ class AutonomousResearchJob(BaseJob):
         self._topic_index += 1
 
         # Search for latest news
-        news = searcher.search_ai_news(topic, max_results=3)
+        news = searcher.search_ai_news(topic, max_results=5)
         if not news.results:
             return JobResult(success=True, data={"topic": topic, "found": 0})
 
-        # Scrape and store top results
+        # Try to scrape — attempt all results, keep what works
         stored = 0
         scraped_titles = []
-        for article in news.results[:2]:
+        for article in news.results:
+            if stored >= 2:  # Cap at 2 scraped articles per run
+                break
             if article.url:
                 result = scraper.scrape_and_store(article.url)
                 if result.get("success"):
                     stored += 1
                     scraped_titles.append(result.get("title", ""))
 
-        # Also store the news search results in memory
+        # Always store news snippets in memory — even if scraping fails
         from core.memory.manager import MemoryManager
         mm = MemoryManager(self.empire_id)
         news_summary = "\n".join(
-            f"- {r.title} ({r.source}): {r.snippet[:150]}"
+            f"- {r.title} ({r.source}): {r.snippet[:200]}"
             for r in news.results
         )
         mm.store(
@@ -295,9 +297,10 @@ class AutonomousResearchJob(BaseJob):
                 "topic": topic,
                 "news_found": len(news.results),
                 "articles_scraped": stored,
+                "snippets_stored": 1,  # Always stores snippet summary
                 "titles": scraped_titles,
             },
-            items_processed=stored,
+            items_processed=stored + 1,  # Snippets always count
         )
 
 

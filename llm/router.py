@@ -93,7 +93,14 @@ class ModelRouter:
     current model health, and historical performance data.
     """
 
-    def __init__(self):
+    def __init__(self, empire_id: str = ""):
+        if not empire_id:
+            try:
+                from config.settings import get_settings
+                empire_id = get_settings().empire_id
+            except Exception:
+                pass
+        self._empire_id = empire_id
         self._health: dict[str, ModelHealth] = {}
         self._clients: dict[str, LLMClient] = {}
         self._initialized = False
@@ -227,6 +234,7 @@ class ModelRouter:
             latency = (time.time() - start) * 1000
 
             self._update_health(decision.model_key, success=True, latency_ms=latency)
+            self._record_cost(response, decision.model_key, decision.provider)
             return response
 
         except Exception as e:
@@ -242,6 +250,7 @@ class ModelRouter:
                 try:
                     response = fallback_client.complete(request)
                     logger.info("Fallback to %s succeeded", decision.fallback_model)
+                    self._record_cost(response, decision.fallback_model, fallback_config.provider)
                     return response
                 except Exception as e2:
                     self._update_health(decision.fallback_model, success=False)
@@ -384,6 +393,24 @@ class ModelRouter:
             f"for {metadata.complexity} {metadata.task_type} task. "
             f"Estimated cost: ${cost:.4f}. Score: {score:.2f}."
         )
+
+    def _record_cost(self, response: LLMResponse, model_key: str, provider: str) -> None:
+        """Record LLM cost to the budget_logs table."""
+        if response.cost_usd <= 0:
+            return
+        try:
+            from core.routing.budget import BudgetManager
+            bm = BudgetManager(self._empire_id if hasattr(self, '_empire_id') else "")
+            bm.record_spend(
+                cost_usd=response.cost_usd,
+                model=model_key,
+                provider=provider,
+                tokens_input=response.tokens_input,
+                tokens_output=response.tokens_output,
+                purpose="llm_call",
+            )
+        except Exception as e:
+            logger.debug("Could not record cost: %s", e)
 
     def _update_health(
         self,

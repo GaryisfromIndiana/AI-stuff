@@ -485,7 +485,8 @@ def api_scrape_and_store():
 def api_research_topic():
     """Search, scrape, and synthesize research on a topic.
 
-    Full pipeline: search → scrape top results → LLM synthesis → store.
+    Full pipeline: search → scrape (with fallback to snippets) → LLM synthesis → store.
+    Tries multiple sources, prefers open sites, falls back to search snippets.
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
     data = request.get_json()
@@ -501,24 +502,71 @@ def api_research_topic():
     scraper = WebScraper(empire_id)
     searcher = WebSearcher(empire_id)
 
-    # 1. Search for sources
-    news = searcher.search_ai_news(topic, max_results=max_sources)
-    urls = [r.url for r in news.results if r.url]
+    # Domains that tend to allow scraping
+    OPEN_DOMAINS = {
+        "arxiv.org", "github.com", "huggingface.co", "simonwillison.net",
+        "lilianweng.github.io", "openai.com", "anthropic.com", "ai.meta.com",
+        "blog.google", "deepmind.google", "mistral.ai", "together.ai",
+        "en.wikipedia.org", "techcrunch.com", "theverge.com", "arstechnica.com",
+        "wired.com", "reuters.com", "apnews.com", "bbc.com", "macrumors.com",
+    }
 
-    # 2. Scrape top results
+    # 1. Search multiple channels for sources
+    all_results = []
+
+    # News search
+    news = searcher.search_ai_news(topic, max_results=max_sources * 2)
+    for r in news.results:
+        all_results.append({"title": r.title, "url": r.url, "snippet": r.snippet, "source": r.source, "type": "news"})
+
+    # Web search as backup
+    web = searcher.search(f"{topic} AI", max_results=max_sources * 2)
+    for r in web.results:
+        if r.url not in {ar["url"] for ar in all_results}:
+            all_results.append({"title": r.title, "url": r.url, "snippet": r.snippet, "source": r.source, "type": "web"})
+
+    if not all_results:
+        return jsonify({"topic": topic, "success": False, "error": "No search results found"})
+
+    # 2. Sort: prefer open domains first
+    def domain_priority(r):
+        domain = r.get("source", "").lower()
+        return 0 if any(od in domain for od in OPEN_DOMAINS) else 1
+
+    all_results.sort(key=domain_priority)
+
+    # 3. Try to scrape — attempt more URLs, keep what works
     scraped = []
-    for url in urls[:max_sources]:
+    scrape_failures = []
+    for result in all_results[:max_sources * 3]:  # Try up to 3x the requested amount
+        if len(scraped) >= max_sources:
+            break
+        url = result.get("url", "")
+        if not url:
+            continue
         page = scraper.scrape_url(url)
-        if page.success:
+        if page.success and page.word_count > 50:
             scraped.append(page)
+        else:
+            scrape_failures.append({"url": url, "error": page.error or "too short"})
 
-    if not scraped:
-        return jsonify({"topic": topic, "success": False, "error": "No sources could be scraped"})
-
-    # 3. Build research context
+    # 4. Build research context — scraped articles + snippet fallback
     source_texts = []
+    source_info = []
+
     for page in scraped:
         source_texts.append(f"## {page.title}\nSource: {page.domain} | {page.date}\n\n{page.content[:3000]}")
+        source_info.append({"title": page.title, "url": page.url, "domain": page.domain, "words": page.word_count, "type": "scraped"})
+
+    # Fallback: if we didn't get enough scraped content, use search snippets
+    if len(source_texts) < max_sources:
+        snippet_sources = [r for r in all_results if r["url"] not in {s.url for s in scraped}]
+        for r in snippet_sources[:max_sources - len(source_texts)]:
+            source_texts.append(f"## {r['title']}\nSource: {r['source']} (snippet only)\n\n{r['snippet']}")
+            source_info.append({"title": r["title"], "url": r["url"], "domain": r["source"], "words": len(r["snippet"].split()), "type": "snippet"})
+
+    if not source_texts:
+        return jsonify({"topic": topic, "success": False, "error": "No content available", "scrape_failures": scrape_failures})
 
     combined = "\n\n---\n\n".join(source_texts)
 
@@ -566,8 +614,11 @@ Be specific and cite which source each finding comes from.
             "topic": topic,
             "success": True,
             "synthesis": response.content,
-            "sources": [{"title": p.title, "url": p.url, "domain": p.domain, "words": p.word_count} for p in scraped],
-            "source_count": len(scraped),
+            "sources": source_info,
+            "source_count": len(source_info),
+            "scraped_count": len(scraped),
+            "snippet_fallbacks": len(source_info) - len(scraped),
+            "scrape_failures": scrape_failures[:5],
             "cost_usd": response.cost_usd,
         })
 
