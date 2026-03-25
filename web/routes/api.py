@@ -781,13 +781,14 @@ def api_generate_content():
 
     return jsonify({
         "title": content.title,
+        "report_id": content.id,
         "template": content.template_used,
         "sections": [
-            {"title": s.title, "content": s.content, "words": s.word_count}
+            {"title": s.title, "content": s.content, "words": s.word_count, "cost": s.cost_usd}
             for s in content.sections
         ],
         "total_words": content.total_words,
-        "cost_usd": content.total_cost,
+        "total_cost": sum(s.cost_usd for s in content.sections),
         "markdown": content.markdown,
     })
 
@@ -835,6 +836,46 @@ def api_render_report(directive_id: str):
     from core.content.generator import ContentGenerator
     gen = ContentGenerator(empire_id)
     content = gen.generate_from_directive(directive_id, template_name)
+    return content.html, 200, {"Content-Type": "text/html"}
+
+
+@api_bp.route("/content/weekly-digest", methods=["POST"])
+def api_weekly_digest():
+    """Generate a weekly AI digest from the last 7 days."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.content.generator import ContentGenerator
+    gen = ContentGenerator(empire_id)
+    content = gen.generate_weekly_digest()
+    return jsonify({
+        "title": content.title,
+        "sections": [{"title": s.title, "content": s.content, "words": s.word_count, "cost": s.cost_usd} for s in content.sections],
+        "total_words": content.total_words,
+        "total_cost": content.total_cost,
+        "markdown": content.markdown,
+    })
+
+
+@api_bp.route("/content/reports")
+def api_stored_reports():
+    """Get previously generated reports."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.content.generator import ContentGenerator
+    gen = ContentGenerator(empire_id)
+    return jsonify(gen.get_stored_reports(limit=int(request.args.get("limit", 10))))
+
+
+@api_bp.route("/content/render-topic", methods=["POST"])
+def api_render_topic():
+    """Generate and render a report as HTML directly."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json()
+    topic = data.get("topic", "")
+    template = data.get("template", "research_briefing")
+    if not topic:
+        return "Topic required", 400
+    from core.content.generator import ContentGenerator
+    gen = ContentGenerator(empire_id)
+    content = gen.generate(topic=topic, template_name=template)
     return content.html, 200, {"Content-Type": "text/html"}
 
 
