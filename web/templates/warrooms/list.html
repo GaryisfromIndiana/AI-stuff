@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}War Rooms — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>War Rooms</h1><p>Multi-lieutenant planning and debate sessions</p></div>
+<div class="card">
+    <table><thead><tr><th>Session</th><th>Type</th><th>Status</th><th>Participants</th><th>Cost</th><th>Created</th></tr></thead>
+    <tbody>{% for w in warrooms %}<tr>
+        <td><a href="/warrooms/{{ w.id }}">{{ w.id[:12] }}...</a></td>
+        <td><span class="badge badge-blue">{{ w.type }}</span></td>
+        <td><span class="badge {% if w.status == 'closed' %}badge-green{% else %}badge-amber{% endif %}">{{ w.status }}</span></td>
+        <td>{{ w.participants }}</td>
+        <td class="mono">${{ "%.4f"|format(w.cost) }}</td>
+        <td class="text-muted">{{ w.created_at[:16] if w.created_at else '' }}</td>
+    </tr>{% endfor %}</tbody></table>
+</div>
+{% endblock %}

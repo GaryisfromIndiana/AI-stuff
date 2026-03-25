@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Lieutenants — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Lieutenant Fleet</h1>
+    <p>{{ lieutenants|length }} lieutenants registered</p>
+</div>
+
+{% if fleet_stats %}
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat">
+        <div class="stat-value">{{ fleet_stats.get('total', 0) }}</div>
+        <div class="stat-label">Total</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value text-green">{{ fleet_stats.get('active', 0) }}</div>
+        <div class="stat-label">Active</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value">{{ "%.2f"|format(fleet_stats.get('avg_performance', 0)) }}</div>
+        <div class="stat-label">Avg Performance</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value mono">${{ "%.2f"|format(fleet_stats.get('total_cost', 0)) }}</div>
+        <div class="stat-label">Total Cost</div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <table>
+        <thead>
+            <tr><th>Name</th><th>Domain</th><th>Status</th><th>Performance</th><th>Tasks</th><th>Cost</th><th>Last Active</th></tr>
+        </thead>
+        <tbody>
+        {% for lt in lieutenants %}
+        <tr>
+            <td><a href="/lieutenants/{{ lt.id }}">{{ lt.name }}</a></td>
+            <td><span class="badge badge-purple">{{ lt.domain }}</span></td>
+            <td><span class="badge {% if lt.status == 'active' %}badge-green{% else %}badge-amber{% endif %}">{{ lt.status }}</span></td>
+            <td>
+                <div class="progress-bar" style="width: 60px; display: inline-block; vertical-align: middle;">
+                    <div class="progress-bar-fill" style="width: {{ (lt.performance_score * 100)|int }}%; background: var(--green);"></div>
+                </div>
+                {{ "%.2f"|format(lt.performance_score) }}
+            </td>
+            <td>{{ lt.tasks_completed }} <span class="text-muted">/ {{ lt.tasks_completed + lt.tasks_failed }}</span></td>
+            <td class="mono">${{ "%.4f"|format(lt.total_cost) }}</td>
+            <td class="text-muted">{{ lt.last_active or 'Never' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

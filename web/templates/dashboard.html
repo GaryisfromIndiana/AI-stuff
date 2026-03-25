@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <p>Empire overview and system status</p>
+</div>
+
+{% if health %}
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat">
+        <div class="stat-value {% if health.get('health', {}).get('status') == 'healthy' %}text-green{% elif health.get('health', {}).get('status') == 'degraded' %}text-amber{% else %}text-rose{% endif %}">
+            {{ health.get('health', {}).get('status', 'unknown')|upper }}
+        </div>
+        <div class="stat-label">System Health</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value">{{ health.get('lieutenants', {}).get('active', 0) }}</div>
+        <div class="stat-label">Active Lieutenants</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value">{{ health.get('directives', {}).get('active', 0) }}</div>
+        <div class="stat-label">Active Directives</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value">{{ health.get('knowledge', {}).get('entities', 0) }}</div>
+        <div class="stat-label">Knowledge Entities</div>
+    </div>
+</div>
+{% endif %}
+
+<div class="grid grid-2">
+    <div class="card">
+        <h2>Active Directives</h2>
+        {% if active_directives %}
+        <table>
+            <thead><tr><th>Title</th><th>Status</th><th>Priority</th></tr></thead>
+            <tbody>
+            {% for d in active_directives %}
+            <tr>
+                <td><a href="/directives/{{ d.id }}">{{ d.title }}</a></td>
+                <td><span class="badge badge-blue">{{ d.status }}</span></td>
+                <td>{{ d.priority }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">No active directives</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>Budget</h2>
+        {% if budget %}
+        <div class="grid grid-2" style="margin-bottom: 1rem;">
+            <div class="stat">
+                <div class="stat-value mono">${{ "%.4f"|format(budget.daily_spend) }}</div>
+                <div class="stat-label">Today's Spend</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value mono">${{ "%.2f"|format(budget.daily_remaining) }}</div>
+                <div class="stat-label">Daily Remaining</div>
+            </div>
+        </div>
+        {% for alert in budget.get('alerts', []) %}
+        <div class="alert alert-warning">{{ alert.message }}</div>
+        {% endfor %}
+        {% endif %}
+    </div>
+</div>
+
+{% if recent_completed %}
+<div class="card" style="margin-top: 1rem;">
+    <h2>Recently Completed</h2>
+    <table>
+        <thead><tr><th>Title</th><th>Quality</th><th>Cost</th></tr></thead>
+        <tbody>
+        {% for d in recent_completed %}
+        <tr>
+            <td><a href="/directives/{{ d.id }}">{{ d.title }}</a></td>
+            <td>{{ "%.2f"|format(d.quality or 0) }}</td>
+            <td class="mono">${{ "%.4f"|format(d.cost or 0) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

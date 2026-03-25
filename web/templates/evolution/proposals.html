@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Proposals — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Evolution Proposals</h1></div>
+<div class="card">
+    <table><thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Confidence</th><th>Created</th></tr></thead>
+    <tbody>{% for p in proposals %}<tr>
+        <td>{{ p.title }}</td>
+        <td><span class="badge badge-purple">{{ p.type }}</span></td>
+        <td><span class="badge {% if p.status == 'approved' %}badge-green{% elif p.status == 'rejected' %}badge-rose{% else %}badge-amber{% endif %}">{{ p.status }}</span></td>
+        <td>{{ "%.2f"|format(p.confidence) }}</td>
+        <td class="text-muted">{{ p.created_at[:16] if p.created_at else '' }}</td>
+    </tr>{% endfor %}</tbody></table>
+</div>
+{% endblock %}

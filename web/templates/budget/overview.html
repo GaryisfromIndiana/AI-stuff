@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Budget — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Budget</h1><p>Cost tracking and management</p></div>
+{% for alert in alerts %}
+<div class="alert {% if alert.severity == 'critical' %}alert-error{% else %}alert-warning{% endif %}">{{ alert.message }}</div>
+{% endfor %}
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat"><div class="stat-value mono">${{ "%.4f"|format(report.get('daily_spend', 0)) }}</div><div class="stat-label">Today's Spend</div></div>
+    <div class="card stat"><div class="stat-value mono">${{ "%.2f"|format(report.get('daily_remaining', 0)) }}</div><div class="stat-label">Daily Remaining</div></div>
+    <div class="card stat"><div class="stat-value mono">${{ "%.2f"|format(report.get('monthly_spend', 0)) }}</div><div class="stat-label">Monthly Spend</div></div>
+    <div class="card stat"><div class="stat-value mono">${{ "%.2f"|format(report.get('monthly_remaining', 0)) }}</div><div class="stat-label">Monthly Remaining</div></div>
+</div>
+<div class="grid grid-2">
+    <div class="card"><h2>Spend by Model</h2>
+        {% for model, cost in report.get('by_model', {}).items() %}
+        <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+            <span class="mono">{{ model }}</span><span class="mono">${{ "%.4f"|format(cost) }}</span>
+        </div>
+        {% endfor %}
+        {% if not report.get('by_model') %}<p class="text-muted">No spending data</p>{% endif %}
+    </div>
+    <div class="card"><h2>Forecast</h2>
+        {% if forecast %}
+        <p><strong>Projected daily:</strong> <span class="mono">${{ "%.4f"|format(forecast.get('projected_daily', 0)) }}</span></p>
+        <p><strong>Projected monthly:</strong> <span class="mono">${{ "%.2f"|format(forecast.get('projected_monthly', 0)) }}</span></p>
+        {% if forecast.get('will_exceed_daily') %}<p class="text-rose">Will exceed daily limit!</p>{% endif %}
+        {% if forecast.get('will_exceed_monthly') %}<p class="text-rose">Will exceed monthly limit!</p>{% endif %}
+        {% if forecast.get('days_until_monthly') and forecast.get('days_until_monthly') < 999 %}
+        <p><strong>Days until monthly limit:</strong> {{ "%.1f"|format(forecast.days_until_monthly) }}</p>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

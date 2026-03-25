@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Entities — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Knowledge Entities</h1></div>
+<div class="card">
+    <table><thead><tr><th>Name</th><th>Type</th><th>Confidence</th><th>Importance</th></tr></thead>
+    <tbody>{% for e in entities %}<tr>
+        <td><a href="/knowledge/entity/{{ e.name }}">{{ e.name }}</a></td>
+        <td><span class="badge badge-purple">{{ e.type }}</span></td>
+        <td>{{ "%.2f"|format(e.confidence) }}</td>
+        <td>{{ "%.2f"|format(e.importance) }}</td>
+    </tr>{% endfor %}</tbody></table>
+</div>
+{% endblock %}

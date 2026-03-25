@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}War Room — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>War Room Session</h1>
+    <p><span class="badge badge-blue">{{ warroom.type }}</span> <span class="badge {% if warroom.status == 'closed' %}badge-green{% else %}badge-amber{% endif %}">{{ warroom.status }}</span></p>
+</div>
+<div class="grid grid-2">
+    <div class="card"><h2>Participants</h2>{% for p in warroom.get('participants', []) %}<p>{{ p }}</p>{% endfor %}</div>
+    <div class="card"><h2>Cost</h2><p class="stat-value mono">${{ "%.4f"|format(warroom.cost) }}</p></div>
+</div>
+{% if warroom.get('synthesis') %}
+<div class="card"><h2>Synthesis</h2>
+    {% if warroom.synthesis.get('summary') %}<p>{{ warroom.synthesis.summary }}</p>{% endif %}
+    {% if warroom.synthesis.get('decisions') %}<h3>Decisions</h3><ul>{% for d in warroom.synthesis.decisions %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% endif %}
+{% if warroom.get('action_items') %}
+<div class="card"><h2>Action Items</h2>
+    {% for ai in warroom.action_items %}<div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+        <span class="badge {% if ai.get('priority') == 'high' %}badge-rose{% else %}badge-amber{% endif %}">{{ ai.get('priority', 'medium') }}</span>
+        {{ ai.get('description', '') }}
+    </div>{% endfor %}
+</div>
+{% endif %}
+{% if warroom.get('transcript') %}
+<div class="card"><h2>Transcript</h2>
+    {% for msg in warroom.transcript[-20:] %}<div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+        <strong>{{ msg.get('speaker_name', 'Unknown') }}</strong> <span class="text-muted mono" style="font-size: 0.7rem;">{{ msg.get('timestamp', '')[:19] }}</span>
+        <p style="margin-top: 0.25rem;">{{ msg.get('content', '')[:500] }}</p>
+    </div>{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

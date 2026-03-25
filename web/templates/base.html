@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ empire_name }}{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0b0f19; --bg-card: #111827; --bg-hover: #1a2332;
+            --border: #1e293b; --border-glow: #334155;
+            --text: #e2e8f0; --text-secondary: #94a3b8; --text-muted: #64748b;
+            --blue: #38bdf8; --green: #34d399; --amber: #fbbf24;
+            --rose: #fb7185; --purple: #a78bfa; --cyan: #22d3ee;
+        }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+        a { color: var(--blue); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .layout { display: flex; min-height: 100vh; }
+        .sidebar { width: 240px; background: var(--bg-card); border-right: 1px solid var(--border); padding: 1.5rem 0; position: fixed; height: 100vh; overflow-y: auto; }
+        .sidebar-brand { padding: 0 1.25rem 1.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+        .sidebar-brand h1 { font-size: 1.1rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--amber); }
+        .sidebar-brand p { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+        .nav-section { margin-bottom: 1rem; }
+        .nav-section-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); padding: 0 1.25rem; margin-bottom: 0.5rem; }
+        .nav-link { display: block; padding: 0.5rem 1.25rem; font-size: 0.85rem; color: var(--text-secondary); transition: all 0.15s; }
+        .nav-link:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+        .nav-link.active { color: var(--cyan); border-right: 2px solid var(--cyan); }
+
+        .main { margin-left: 240px; flex: 1; padding: 2rem; max-width: 1200px; }
+        .page-header { margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+        .page-header h1 { font-size: 1.5rem; font-weight: 700; }
+        .page-header p { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.25rem; }
+
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
+        .card:hover { border-color: var(--border-glow); }
+        .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem; }
+        .card h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-secondary); }
+
+        .grid { display: grid; gap: 1rem; }
+        .grid-2 { grid-template-columns: repeat(2, 1fr); }
+        .grid-3 { grid-template-columns: repeat(3, 1fr); }
+        .grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+        .stat { text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
+        .badge-green { background: rgba(52,211,153,0.15); color: var(--green); }
+        .badge-amber { background: rgba(251,191,36,0.15); color: var(--amber); }
+        .badge-rose { background: rgba(251,113,133,0.15); color: var(--rose); }
+        .badge-blue { background: rgba(56,189,248,0.15); color: var(--blue); }
+        .badge-purple { background: rgba(167,139,250,0.15); color: var(--purple); }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 0.75rem; border-bottom: 1px solid var(--border); }
+        td { padding: 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+        tr:hover td { background: var(--bg-hover); }
+
+        .btn { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); cursor: pointer; transition: all 0.15s; }
+        .btn:hover { background: var(--bg-hover); border-color: var(--border-glow); }
+        .btn-primary { background: rgba(56,189,248,0.15); border-color: var(--blue); color: var(--blue); }
+        .btn-primary:hover { background: rgba(56,189,248,0.25); }
+
+        .mono { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+        .text-green { color: var(--green); }
+        .text-amber { color: var(--amber); }
+        .text-rose { color: var(--rose); }
+        .text-muted { color: var(--text-muted); }
+
+        .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+        .alert { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.85rem; }
+        .alert-warning { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: var(--amber); }
+        .alert-error { background: rgba(251,113,133,0.1); border: 1px solid rgba(251,113,133,0.3); color: var(--rose); }
+
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; padding: 1rem; }
+            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+            <div class="sidebar-brand">
+                <h1>{{ empire_name }}</h1>
+                <p>Autonomous AI System</p>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">Overview</div>
+                <a href="/" class="nav-link">Dashboard</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">Operations</div>
+                <a href="/lieutenants" class="nav-link">Lieutenants</a>
+                <a href="/directives" class="nav-link">Directives</a>
+                <a href="/warrooms" class="nav-link">War Rooms</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">Intelligence</div>
+                <a href="/knowledge" class="nav-link">Knowledge Graph</a>
+                <a href="/evolution" class="nav-link">Evolution</a>
+            </div>
+            <div class="nav-section">
+                <div class="nav-section-title">System</div>
+                <a href="/settings" class="nav-link">Settings</a>
+                <a href="/settings/health" class="nav-link">Health</a>
+            </div>
+        </nav>
+
+        <main class="main">
+            {% if error %}
+            <div class="alert alert-error">{{ error }}</div>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

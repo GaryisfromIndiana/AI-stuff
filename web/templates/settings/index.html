@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Settings — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Settings</h1><p>Empire configuration</p></div>
+{% if settings %}
+<div class="grid grid-2">
+    <div class="card"><h2>Empire</h2>
+        <p><strong>ID:</strong> <span class="mono">{{ settings.empire_id }}</span></p>
+        <p><strong>Name:</strong> {{ settings.empire_name }}</p>
+        <p><strong>Debug:</strong> {{ settings.debug }}</p>
+        <p><strong>DB:</strong> <span class="mono">{{ settings.db_url }}</span></p>
+    </div>
+    <div class="card"><h2>ACE Engine</h2>
+        <p><strong>Planning:</strong> <span class="mono">{{ settings.ace.planning_model }}</span></p>
+        <p><strong>Execution:</strong> <span class="mono">{{ settings.ace.execution_model }}</span></p>
+        <p><strong>Critic:</strong> <span class="mono">{{ settings.ace.critic_model }}</span></p>
+        <p><strong>Max Iterations:</strong> {{ settings.ace.max_iterations }}</p>
+    </div>
+    <div class="card"><h2>Budget</h2>
+        <p><strong>Daily Limit:</strong> ${{ settings.budget.daily_limit }}</p>
+        <p><strong>Monthly Limit:</strong> ${{ settings.budget.monthly_limit }}</p>
+        <p><strong>Per-Task Limit:</strong> ${{ settings.budget.per_task_limit }}</p>
+        <p><strong>Alert Threshold:</strong> {{ settings.budget.alert_threshold }}%</p>
+    </div>
+    <div class="card"><h2>Scheduler</h2>
+        <p><strong>Tick Interval:</strong> {{ settings.scheduler.tick_interval }}s</p>
+        <p><strong>Learning Cycle:</strong> every {{ settings.scheduler.learning_cycle_hours }}h</p>
+        <p><strong>Evolution Cycle:</strong> every {{ settings.scheduler.evolution_cycle_hours }}h</p>
+        <p><strong>Health Checks:</strong> every {{ settings.scheduler.health_check_minutes }}m</p>
+    </div>
+    <div class="card"><h2>Quality Gates</h2>
+        <p><strong>Min Confidence:</strong> {{ settings.quality.min_confidence }}</p>
+        <p><strong>Min Completeness:</strong> {{ settings.quality.min_completeness }}</p>
+        <p><strong>Require Citations:</strong> {{ settings.quality.require_citations }}</p>
+    </div>
+</div>
+{% endif %}
+<div style="margin-top: 1rem;">
+    <a href="/settings/health" class="btn btn-primary">Run Health Check</a>
+    <a href="/settings/models" class="btn">View Models</a>
+    <a href="/settings/db/stats" class="btn">DB Stats</a>
+</div>
+{% endblock %}

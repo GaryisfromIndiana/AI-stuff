@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Empire Network — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Empire Network</h1><p>Cross-empire coordination and replication</p></div>
+{% if network %}
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat"><div class="stat-value">{{ network.get('total_empires', 0) }}</div><div class="stat-label">Empires</div></div>
+    <div class="card stat"><div class="stat-value">{{ network.get('total_lieutenants', 0) }}</div><div class="stat-label">Lieutenants</div></div>
+    <div class="card stat"><div class="stat-value">{{ network.get('total_knowledge_entities', 0) }}</div><div class="stat-label">Knowledge</div></div>
+    <div class="card stat"><div class="stat-value mono">${{ "%.2f"|format(network.get('total_cost_usd', 0)) }}</div><div class="stat-label">Total Cost</div></div>
+</div>
+{% if network.get('empires') %}
+<div class="card">
+    <h2>Connected Empires</h2>
+    <table><thead><tr><th>Name</th><th>Domain</th><th>Status</th></tr></thead>
+    <tbody>{% for e in network.get('empires', []) %}<tr>
+        <td>{{ e.name }}</td>
+        <td><span class="badge badge-purple">{{ e.domain }}</span></td>
+        <td><span class="badge {% if e.status == 'active' %}badge-green{% else %}badge-amber{% endif %}">{{ e.status }}</span></td>
+    </tr>{% endfor %}</tbody></table>
+</div>
+{% endif %}
+{% endif %}
+<div style="margin-top: 1rem;">
+    <a href="/network/templates" class="btn">Empire Templates</a>
+    <a href="/network/empires" class="btn">All Empires</a>
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Knowledge Graph — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Knowledge Graph</h1>
+    <p>Entity-relation knowledge across the empire</p>
+</div>
+<div class="grid grid-3" style="margin-bottom: 1.5rem;">
+    <div class="card stat"><div class="stat-value">{{ stats.get('entity_count', 0) }}</div><div class="stat-label">Entities</div></div>
+    <div class="card stat"><div class="stat-value">{{ stats.get('relation_count', 0) }}</div><div class="stat-label">Relations</div></div>
+    <div class="card stat"><div class="stat-value">{{ "%.2f"|format(stats.get('avg_confidence', 0)) }}</div><div class="stat-label">Avg Confidence</div></div>
+</div>
+{% if central_entities %}
+<div class="card">
+    <h2>Most Connected Entities</h2>
+    <table><thead><tr><th>Name</th><th>Type</th><th>Importance</th></tr></thead>
+    <tbody>{% for e in central_entities %}<tr><td><a href="/knowledge/entity/{{ e.name }}">{{ e.name }}</a></td><td><span class="badge badge-purple">{{ e.type }}</span></td><td>{{ "%.2f"|format(e.importance) }}</td></tr>{% endfor %}</tbody>
+    </table>
+</div>
+{% endif %}
+{% if stats.get('entity_types') %}
+<div class="card">
+    <h2>Entity Types</h2>
+    {% for type, count in stats.get('entity_types', {}).items() %}
+    <div style="display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid var(--border);">
+        <span>{{ type }}</span><span class="mono">{{ count }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

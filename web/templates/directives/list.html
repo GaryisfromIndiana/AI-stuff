@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Directives — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Directives</h1>
+    <p>High-level tasks flowing through the pipeline</p>
+</div>
+<div class="card">
+    <table>
+        <thead><tr><th>Title</th><th>Status</th><th>Priority</th><th>Source</th><th>Cost</th><th>Created</th></tr></thead>
+        <tbody>
+        {% for d in directives %}
+        <tr>
+            <td><a href="/directives/{{ d.id }}">{{ d.title }}</a></td>
+            <td><span class="badge {% if d.status == 'completed' %}badge-green{% elif d.status == 'failed' %}badge-rose{% elif d.status in ['planning', 'executing'] %}badge-blue{% else %}badge-amber{% endif %}">{{ d.status }}</span></td>
+            <td>{{ d.priority }}</td>
+            <td>{{ d.source }}</td>
+            <td class="mono">${{ "%.4f"|format(d.total_cost) }}</td>
+            <td class="text-muted">{{ d.created_at[:10] if d.created_at else '' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

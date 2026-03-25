@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ entity_name }} — Knowledge — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ entity_name }}</h1><p>Knowledge entity detail</p></div>
+<div class="grid grid-2">
+    <div class="card"><h2>Subgraph</h2><p>{{ subgraph.nodes }} nodes, {{ subgraph.edges }} edges</p></div>
+    <div class="card"><h2>Neighbors</h2>
+        {% for n in neighbors %}<div style="padding: 0.25rem 0; border-bottom: 1px solid var(--border);">
+            <span class="badge badge-purple">{{ n.type }}</span> {{ n.name }} <span class="text-muted">(depth {{ n.depth }})</span>
+        </div>{% endfor %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Memory — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Memory System</h1><p>4-tier memory: semantic, experiential, design, episodic</p></div>
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat"><div class="stat-value">{{ stats.get('total_count', 0) }}</div><div class="stat-label">Total Memories</div></div>
+    <div class="card stat"><div class="stat-value">{{ "%.2f"|format(stats.get('avg_importance', 0)) }}</div><div class="stat-label">Avg Importance</div></div>
+    <div class="card stat"><div class="stat-value">{{ "%.2f"|format(stats.get('avg_decay', 0)) }}</div><div class="stat-label">Avg Decay</div></div>
+    <div class="card stat">
+        {% set by_type = stats.get('by_type', {}) %}
+        <div class="stat-value">{{ by_type|length }}</div><div class="stat-label">Active Types</div>
+    </div>
+</div>
+{% if stats.get('by_type') %}
+<div class="card">
+    <h2>By Type</h2>
+    <div class="grid grid-4">
+    {% for type_name, type_data in stats.get('by_type', {}).items() %}
+        <div style="text-align: center; padding: 1rem;">
+            <div style="font-size: 1.3rem; font-weight: 700;">{{ type_data.count if type_data is mapping else type_data }}</div>
+            <div class="stat-label">{{ type_name }}</div>
+        </div>
+    {% endfor %}
+    </div>
+</div>
+{% endif %}
+<div class="card">
+    <h2>Recent Memories</h2>
+    <table><thead><tr><th>Type</th><th>Title</th><th>Importance</th><th>Created</th></tr></thead>
+    <tbody>{% for m in recent %}<tr>
+        <td><span class="badge badge-purple">{{ m.type }}</span></td>
+        <td>{{ m.title or m.content[:60] }}</td>
+        <td>{{ "%.2f"|format(m.importance) }}</td>
+        <td class="text-muted">{{ m.created_at[:16] if m.created_at else '' }}</td>
+    </tr>{% endfor %}</tbody></table>
+</div>
+<div style="margin-top: 1rem;">
+    <a href="/memory/search" class="btn btn-primary">Search Memories</a>
+    <form method="POST" action="/memory/decay" style="display: inline; margin-left: 0.5rem;"><button type="submit" class="btn">Run Decay</button></form>
+    <form method="POST" action="/memory/cleanup" style="display: inline; margin-left: 0.5rem;"><button type="submit" class="btn">Cleanup</button></form>
+    <form method="POST" action="/memory/consolidate" style="display: inline; margin-left: 0.5rem;"><button type="submit" class="btn">Consolidate</button></form>
+</div>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Scheduler — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Scheduler</h1><p>Autonomous background jobs</p></div>
+{% if status %}
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat"><div class="stat-value {% if status.get('running') %}text-green{% else %}text-rose{% endif %}">{{ 'Running' if status.get('running') else 'Stopped' }}</div><div class="stat-label">Status</div></div>
+    <div class="card stat"><div class="stat-value">{{ status.get('jobs_registered', 0) }}</div><div class="stat-label">Jobs</div></div>
+    <div class="card stat"><div class="stat-value">{{ status.get('total_job_runs', 0) }}</div><div class="stat-label">Total Runs</div></div>
+    <div class="card stat"><div class="stat-value {% if status.get('errors', 0) > 0 %}text-rose{% endif %}">{{ status.get('errors', 0) }}</div><div class="stat-label">Errors</div></div>
+</div>
+{% endif %}
+<div class="card">
+    <h2>Scheduled Jobs</h2>
+    <table><thead><tr><th>Job</th><th>Interval</th><th>Status</th><th>Next Run</th><th>Actions</th></tr></thead>
+    <tbody>{% for j in jobs %}<tr>
+        <td>{{ j.name }}</td>
+        <td class="mono">{{ j.interval }}s</td>
+        <td><span class="badge {% if j.status == 'active' %}badge-green{% else %}badge-amber{% endif %}">{{ j.status }}</span></td>
+        <td class="text-muted mono">{{ j.next_run[:19] if j.next_run else '—' }}</td>
+        <td>
+            <form method="POST" action="/scheduler/jobs/{{ j.name }}/run" style="display: inline;"><button type="submit" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Run Now</button></form>
+        </td>
+    </tr>{% endfor %}</tbody></table>
+</div>
+<div style="margin-top: 1rem;">
+    <form method="POST" action="/scheduler/tick" style="display: inline;"><button type="submit" class="btn btn-primary">Manual Tick</button></form>
+</div>
+{% endblock %}

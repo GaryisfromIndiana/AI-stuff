@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ directive.title }} — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>{{ directive.title }}</h1>
+    <p><span class="badge {% if directive.status == 'completed' %}badge-green{% elif directive.status == 'failed' %}badge-rose{% else %}badge-blue{% endif %}">{{ directive.status }}</span> Priority: {{ directive.priority }}</p>
+</div>
+
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat">
+        <div class="stat-value">{{ progress.get('total_tasks', 0) }}</div>
+        <div class="stat-label">Total Tasks</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value text-green">{{ progress.get('completed', 0) }}</div>
+        <div class="stat-label">Completed</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value text-rose">{{ progress.get('failed', 0) }}</div>
+        <div class="stat-label">Failed</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value mono">${{ "%.4f"|format(cost.get('total_cost', 0)) }}</div>
+        <div class="stat-label">Total Cost</div>
+    </div>
+</div>
+
+{% if progress.get('total_tasks', 0) > 0 %}
+<div class="card">
+    <h2>Progress</h2>
+    <div class="progress-bar" style="height: 12px; margin: 1rem 0;">
+        <div class="progress-bar-fill" style="width: {{ progress.get('completion_percent', 0)|int }}%; background: var(--green);"></div>
+    </div>
+    <p class="text-muted">{{ progress.get('completion_percent', 0)|int }}% complete</p>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>Description</h2>
+    <p>{{ directive.description }}</p>
+</div>
+
+{% if timeline %}
+<div class="card">
+    <h2>Timeline</h2>
+    {% for event in timeline[-10:] %}
+    <div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+        <span class="text-muted mono" style="font-size: 0.75rem;">{{ event.time[:19] if event.time else '' }}</span>
+        <span class="badge badge-blue" style="margin-left: 0.5rem;">{{ event.event }}</span>
+        {% if event.details.get('title') %}<span style="margin-left: 0.5rem;">{{ event.details.title }}</span>{% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

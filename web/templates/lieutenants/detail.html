@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ lieutenant.name }} — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>{{ lieutenant.name }}</h1>
+    <p>{{ lieutenant.domain }} • <span class="badge {% if lieutenant.status == 'active' %}badge-green{% else %}badge-amber{% endif %}">{{ lieutenant.status }}</span></p>
+</div>
+
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat">
+        <div class="stat-value">{{ "%.2f"|format(lieutenant.performance) }}</div>
+        <div class="stat-label">Performance</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value text-green">{{ lieutenant.tasks_completed }}</div>
+        <div class="stat-label">Completed</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value text-rose">{{ lieutenant.tasks_failed }}</div>
+        <div class="stat-label">Failed</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value mono">${{ "%.4f"|format(lieutenant.total_cost) }}</div>
+        <div class="stat-label">Total Cost</div>
+    </div>
+</div>
+
+<div class="grid grid-2">
+    <div class="card">
+        <h2>Persona</h2>
+        {% if lieutenant.persona %}
+        <p><strong>Role:</strong> {{ lieutenant.persona.get('role', 'N/A') }}</p>
+        <p><strong>Style:</strong> {{ lieutenant.persona.get('communication_style', 'N/A') }}</p>
+        <p><strong>Approach:</strong> {{ lieutenant.persona.get('analysis_approach', 'N/A') }}</p>
+        <p><strong>Expertise:</strong> {{ lieutenant.persona.get('expertise_areas', [])|join(', ') }}</p>
+        {% endif %}
+    </div>
+    <div class="card">
+        <h2>Task Statistics</h2>
+        {% if task_stats %}
+        <p><strong>Total:</strong> {{ task_stats.get('total_tasks', 0) }}</p>
+        <p><strong>Avg Quality:</strong> {{ "%.2f"|format(task_stats.get('avg_quality', 0)) }}</p>
+        <p><strong>Avg Time:</strong> {{ "%.1f"|format(task_stats.get('avg_execution_time', 0)) }}s</p>
+        <p><strong>Total Cost:</strong> ${{ "%.4f"|format(task_stats.get('total_cost', 0)) }}</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if cost_breakdown %}
+<div class="card" style="margin-top: 1rem;">
+    <h2>Cost Breakdown</h2>
+    <table>
+        <thead><tr><th>Model</th><th>Cost</th><th>Requests</th></tr></thead>
+        <tbody>
+        {% for model, data in cost_breakdown.get('by_model', {}).items() %}
+        <tr>
+            <td class="mono">{{ model }}</td>
+            <td class="mono">${{ "%.4f"|format(data.cost) }}</td>
+            <td>{{ data.count }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

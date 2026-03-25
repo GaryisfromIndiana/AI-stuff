@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Evolution — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Evolution</h1><p>Self-improvement cycles — propose, review, implement, learn</p></div>
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat"><div class="stat-value">{{ stats.get('total_cycles', 0) }}</div><div class="stat-label">Total Cycles</div></div>
+    <div class="card stat"><div class="stat-value">{{ "%.0f"|format(stats.get('approval_rate', 0) * 100) }}%</div><div class="stat-label">Approval Rate</div></div>
+    <div class="card stat"><div class="stat-value">{{ "%.1f"|format(stats.get('avg_proposals', 0)) }}</div><div class="stat-label">Avg Proposals</div></div>
+    <div class="card stat"><div class="stat-value mono">${{ "%.2f"|format(stats.get('total_cost', 0)) }}</div><div class="stat-label">Total Cost</div></div>
+</div>
+<div class="card">
+    <h2>Cycle History</h2>
+    <table><thead><tr><th>Cycle</th><th>Status</th><th>Proposals</th><th>Approved</th><th>Applied</th><th>Cost</th><th>Completed</th></tr></thead>
+    <tbody>{% for c in history %}<tr>
+        <td>#{{ c.cycle_number }}</td>
+        <td><span class="badge {% if c.status == 'completed' %}badge-green{% else %}badge-amber{% endif %}">{{ c.status }}</span></td>
+        <td>{{ c.proposals }}</td><td>{{ c.approved }}</td><td>{{ c.applied }}</td>
+        <td class="mono">${{ "%.4f"|format(c.cost) }}</td>
+        <td class="text-muted">{{ c.completed_at[:16] if c.completed_at else '' }}</td>
+    </tr>{% endfor %}</tbody></table>
+</div>
+<div style="margin-top: 1rem;"><a href="/evolution/proposals" class="btn">View All Proposals</a>
+    <form method="POST" action="/evolution/run-cycle" style="display: inline; margin-left: 0.5rem;">
+        <button type="submit" class="btn btn-primary">Run Evolution Cycle</button>
+    </form>
+</div>
+{% endblock %}

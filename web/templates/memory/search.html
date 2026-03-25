@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Search Memory — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Search Memories</h1></div>
+<div class="card">
+    <form method="GET" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+        <input type="text" name="q" value="{{ query }}" placeholder="Search memories..." style="flex: 1; padding: 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.9rem;">
+        <select name="type" style="padding: 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text);">
+            <option value="">All types</option>
+            <option value="semantic" {% if 'semantic' in types %}selected{% endif %}>Semantic</option>
+            <option value="experiential" {% if 'experiential' in types %}selected{% endif %}>Experiential</option>
+            <option value="design" {% if 'design' in types %}selected{% endif %}>Design</option>
+            <option value="episodic" {% if 'episodic' in types %}selected{% endif %}>Episodic</option>
+        </select>
+        <button type="submit" class="btn btn-primary">Search</button>
+    </form>
+</div>
+{% if results %}
+<div class="card">
+    <h2>{{ results|length }} Results</h2>
+    <table><thead><tr><th>Type</th><th>Title</th><th>Content</th><th>Importance</th></tr></thead>
+    <tbody>{% for m in results %}<tr>
+        <td><span class="badge badge-purple">{{ m.type }}</span></td>
+        <td>{{ m.title or '—' }}</td>
+        <td>{{ m.content[:150] }}{% if m.content|length > 150 %}...{% endif %}</td>
+        <td>{{ "%.2f"|format(m.importance) }}</td>
+    </tr>{% endfor %}</tbody></table>
+</div>
+{% elif query %}
+<div class="card"><p class="text-muted">No results found for "{{ query }}"</p></div>
+{% endif %}
+{% endblock %}
