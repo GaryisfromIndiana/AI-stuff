@@ -193,8 +193,15 @@ class ACEEngine:
         system_prompt = context.build_system_prompt()
 
         try:
-            # ── Stage 1: Planning ──────────────────────────────────────
-            plan = self._run_planning(task, system_prompt, context)
+            # ── Stage 1: Planning (skip for short/simple tasks) ────────
+            desc_len = len(task.description)
+            skip_planning = desc_len < 200 or task.task_type in ("extraction", "classification")
+
+            if skip_planning:
+                plan = {"plan": "Direct execution (simple task)", "cost": 0.0, "tokens": 0}
+            else:
+                plan = self._run_planning(task, system_prompt, context)
+
             result.planning_output = plan
             result.cost_usd += plan.get("cost", 0.0)
             result.tokens_input += plan.get("tokens", 0)

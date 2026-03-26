@@ -377,26 +377,20 @@ class Lieutenant:
         except Exception as e:
             logger.debug("[%s] Memory context build failed: %s", self.name, e)
 
-        # Get relevant knowledge graph entities
+        # Get relevant knowledge graph entities (lightweight — no neighbor traversal)
         knowledge_context = ""
         try:
             from core.knowledge.graph import KnowledgeGraph
             graph = KnowledgeGraph(self.empire_id)
-
-            # Search for entities related to the task
             entities = graph.find_entities(query=task_query[:100], limit=5)
             if entities:
-                kg_parts = []
-                for entity in entities:
-                    neighbors = graph.get_neighbors(entity.name, max_depth=1)
-                    neighbor_names = [n.name for n in neighbors[:3]]
-                    entry = f"- {entity.name} ({entity.entity_type}): {entity.description[:150]}"
-                    if neighbor_names:
-                        entry += f" [related: {', '.join(neighbor_names)}]"
-                    kg_parts.append(entry)
-                knowledge_context = "## Knowledge Graph\n" + "\n".join(kg_parts)
-        except Exception as e:
-            logger.debug("[%s] Knowledge context build failed: %s", self.name, e)
+                kg_parts = [
+                    f"- {e.name} ({e.entity_type}): {e.description[:150]}"
+                    for e in entities
+                ]
+                knowledge_context = "## Known Entities\n" + "\n".join(kg_parts)
+        except Exception:
+            pass
 
         # Build the full context
         context_parts = [self.persona.build_system_prompt()]
@@ -470,6 +464,9 @@ class Lieutenant:
     def _extract_knowledge(self, result: TaskResult) -> None:
         """Extract entities from task results into knowledge graph."""
         if not result.success or not result.content:
+            return
+        # Skip extraction for very short content (not worth the LLM call)
+        if len(result.content) < 200:
             return
 
         try:

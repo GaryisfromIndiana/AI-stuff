@@ -3,29 +3,12 @@
 from __future__ import annotations
 
 import logging
-import time
 import json
+import time
 from flask import Blueprint, jsonify, request, current_app
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__)
-
-
-def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    try:
-        payload = {
-            "sessionId": "121c22",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open("/Users/asd/Desktop/financial modeling/.cursor/debug-121c22.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, default=str) + "\n")
-    except Exception:
-        pass
 
 
 # ── Empire ─────────────────────────────────────────────────────────────
@@ -137,52 +120,15 @@ def api_execute_directive(directive_id: str):
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
     import threading
-    run_id = f"directive:{directive_id}"
-    # region agent log
-    _debug_log(
-        run_id,
-        "H1",
-        "web/routes/api.py:api_execute_directive:request",
-        "execute endpoint called",
-        {"directive_id": directive_id, "empire_id_present": bool(empire_id)},
-    )
-    # endregion
 
     def run_directive():
         from core.directives.manager import DirectiveManager
         dm = DirectiveManager(empire_id)
         try:
-            # region agent log
-            _debug_log(
-                run_id,
-                "H1",
-                "web/routes/api.py:api_execute_directive:thread_start",
-                "directive thread started",
-                {"thread_name": threading.current_thread().name},
-            )
-            # endregion
             dm.execute_directive(directive_id)
-            # region agent log
-            _debug_log(
-                run_id,
-                "H1",
-                "web/routes/api.py:api_execute_directive:thread_end",
-                "directive thread finished without exception",
-                {},
-            )
-            # endregion
         except Exception as e:
             import logging
             logging.getLogger(__name__).error("Directive execution failed: %s", e)
-            # region agent log
-            _debug_log(
-                run_id,
-                "H5",
-                "web/routes/api.py:api_execute_directive:thread_exception",
-                "directive thread raised exception",
-                {"error": str(e)},
-            )
-            # endregion
 
     thread = threading.Thread(target=run_directive, daemon=True, name=f"directive-{directive_id[:8]}")
     thread.start()
