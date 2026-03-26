@@ -314,13 +314,23 @@ class DirectiveManager:
                 "success_rate": sum(1 for t in wave_task_results if t.get("success")) / max(len(wave_task_results), 1),
             })
 
-        # 3. Persist War Room session
+        # 3. Retrospective + War Room persistence
+        retro_result = {}
         try:
-            session.close_session()
+            retro_result = session.run_retrospective({
+                "directive": db_directive.title,
+                "waves": wave_results,
+                "total_cost": total_cost,
+            })
         except Exception as e:
-            logger.warning("War Room close failed: %s", e)
+            logger.warning("Retrospective failed: %s", e)
+        finally:
+            try:
+                session.close_session()
+            except Exception as e:
+                logger.warning("War Room close failed: %s", e)
 
-        # 4. Complete (retrospective skipped — runs async via scheduler if needed)
+        # 4. Complete
         repo = self._get_repo()
         repo.update(
             directive_id,
@@ -338,7 +348,7 @@ class DirectiveManager:
             "directive_id": directive_id,
             "status": "completed",
             "wave_results": wave_results,
-            "retrospective": {},
+            "retrospective": retro_result,
             "total_cost": total_cost,
             "duration_seconds": duration,
         }
