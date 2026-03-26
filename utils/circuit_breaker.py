@@ -20,10 +20,10 @@ class CircuitState(str, Enum):
 
 @dataclass
 class CircuitBreakerConfig:
-    failure_threshold: int = 5
-    success_threshold: int = 3
-    timeout_seconds: float = 60.0
-    half_open_max_calls: int = 3
+    failure_threshold: int = 15
+    success_threshold: int = 2
+    timeout_seconds: float = 30.0
+    half_open_max_calls: int = 5
 
 
 class CircuitOpenError(Exception):
