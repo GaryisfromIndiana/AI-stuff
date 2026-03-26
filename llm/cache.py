@@ -76,7 +76,8 @@ class LLMCache:
     def _connect(self) -> None:
         try:
             import redis
-            self._redis = redis.from_url(self._redis_url, decode_responses=True, socket_timeout=2.0)
+            logger.info("LLM cache connecting to: %s", self._redis_url[:30] + "...")
+            self._redis = redis.from_url(self._redis_url, decode_responses=True, socket_timeout=5.0)
             self._redis.ping()
             logger.info("LLM cache connected to Redis")
         except ImportError:
