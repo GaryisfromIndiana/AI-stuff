@@ -219,6 +219,15 @@ class SchedulerDaemon:
             description="Auto-generate research digest",
         ))
 
+        self.register_job(JobConfig(
+            name="llm_audit",
+            job_type="llm_audit",
+            interval_seconds=43200,  # 12 hours
+            handler=self._run_llm_audit,
+            priority=6,
+            description="Deep LLM audit for contaminated entities",
+        ))
+
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
         with self._lock:
@@ -586,4 +595,14 @@ class SchedulerDaemon:
             return {"report_id": report.get("id", ""), "sections": report.get("sections", 0)}
         except Exception as e:
             logger.warning("Content generation failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_llm_audit(self) -> dict:
+        """Deep LLM audit for contaminated/hallucinated entities."""
+        try:
+            from core.knowledge.maintenance import KnowledgeMaintainer
+            maintainer = KnowledgeMaintainer(self.empire_id)
+            return maintainer.deep_llm_audit(batch_size=20)
+        except Exception as e:
+            logger.warning("LLM audit failed: %s", e)
             return {"error": str(e)}

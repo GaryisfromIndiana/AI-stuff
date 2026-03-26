@@ -354,6 +354,112 @@ class KnowledgeMaintainer:
             "empire_id": self.empire_id,
         }
 
+    def deep_llm_audit(self, batch_size: int = 20) -> dict:
+        """Deep LLM audit — scans entities for hallucinations, contamination, and malformed data.
+
+        Uses an LLM to evaluate each entity's description for:
+        - Hallucinated facts (plausible but false statements)
+        - Prompt artifacts (leaked system prompts, formatting remnants)
+        - Outdated information (superseded by newer data)
+        - Malformed data (broken formatting, incomplete descriptions)
+
+        Args:
+            batch_size: Number of entities to audit per run.
+
+        Returns:
+            Audit results with purged/flagged entity counts.
+        """
+        repo = self._get_repo()
+        entities = repo.get_by_empire(self.empire_id, limit=batch_size)
+
+        if not entities:
+            return {"audited": 0, "flagged": 0, "purged": 0}
+
+        flagged = []
+        purged = 0
+
+        try:
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+            router = ModelRouter()
+
+            # Batch entities into groups of 5 for efficiency
+            for i in range(0, len(entities), 5):
+                batch = entities[i:i + 5]
+                entity_text = "\n".join(
+                    f"[{e.id[:8]}] {e.name} ({e.entity_type}): {(e.description or '')[:200]}"
+                    for e in batch
+                )
+
+                prompt = (
+                    "You are a knowledge graph auditor. Evaluate each entity below for data quality issues.\n\n"
+                    "Flag entities that have:\n"
+                    "- HALLUCINATION: plausible but likely false or unverifiable claims\n"
+                    "- ARTIFACT: prompt remnants, system instructions, formatting debris\n"
+                    "- MALFORMED: broken text, incomplete data, nonsensical content\n"
+                    "- OUTDATED: information known to be superseded\n\n"
+                    f"Entities:\n{entity_text}\n\n"
+                    "For each entity, respond with one line:\n"
+                    "[entity_id] CLEAN or [entity_id] FLAG:reason\n"
+                    "Only flag entities with clear issues. When in doubt, mark CLEAN."
+                )
+
+                try:
+                    response = router.execute(
+                        LLMRequest(
+                            messages=[LLMMessage.user(prompt)],
+                            max_tokens=500,
+                            temperature=0.1,
+                        ),
+                        TaskMetadata(task_type="analysis", complexity="moderate"),
+                    )
+
+                    # Parse response for flagged entities
+                    for line in response.content.strip().split("\n"):
+                        line = line.strip()
+                        if "FLAG:" in line.upper():
+                            entity_id_prefix = line.split("]")[0].replace("[", "").strip()
+                            reason = line.split("FLAG:")[-1].strip() if "FLAG:" in line else "unknown"
+
+                            # Find matching entity and reduce confidence
+                            for e in batch:
+                                if e.id.startswith(entity_id_prefix):
+                                    flagged.append({
+                                        "id": e.id,
+                                        "name": e.name,
+                                        "reason": reason,
+                                    })
+                                    # Reduce confidence significantly
+                                    if e.confidence > 0.2:
+                                        e.confidence = max(0.1, e.confidence - 0.3)
+                                    else:
+                                        # Very low confidence — purge
+                                        repo.delete(e.id)
+                                        purged += 1
+                                    break
+
+                except Exception as e:
+                    logger.warning("LLM audit batch failed: %s", e)
+                    continue
+
+            repo.commit()
+
+        except Exception as e:
+            logger.warning("Deep LLM audit failed: %s", e)
+            return {"audited": len(entities), "error": str(e)}
+
+        logger.info(
+            "Deep LLM audit: %d audited, %d flagged, %d purged",
+            len(entities), len(flagged), purged,
+        )
+
+        return {
+            "audited": len(entities),
+            "flagged": len(flagged),
+            "purged": purged,
+            "flagged_entities": flagged[:10],  # Return top 10
+        }
+
     def generate_knowledge_report(self) -> KnowledgeReport:
         """Generate a comprehensive knowledge report without running maintenance."""
         graph = self._get_graph()

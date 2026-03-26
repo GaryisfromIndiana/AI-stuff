@@ -372,6 +372,19 @@ def api_knowledge_quality():
     return jsonify(stats)
 
 
+@api_bp.route("/knowledge/audit", methods=["POST"])
+@rate_limit(requests_per_minute=2, requests_per_hour=10)
+def api_knowledge_audit():
+    """Deep LLM audit for contaminated/hallucinated entities."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = _get_json_or_400()
+    batch_size = data.get("batch_size", 20)
+    from core.knowledge.maintenance import KnowledgeMaintainer
+    maintainer = KnowledgeMaintainer(empire_id)
+    result = maintainer.deep_llm_audit(batch_size=min(batch_size, 50))
+    return jsonify(result)
+
+
 @api_bp.route("/knowledge/duplicates")
 def api_knowledge_duplicates():
     """Find duplicate entities."""
