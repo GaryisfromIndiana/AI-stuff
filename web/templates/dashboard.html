@@ -169,6 +169,76 @@
     {% endif %}
 </div>
 
+<!-- ── Infrastructure ─────────────────────────────────────────────── -->
+{% if infra %}
+<div class="card" style="margin-bottom: 1rem;">
+    <h2>Infrastructure</h2>
+    <div class="grid grid-3" style="margin-top: 0.75rem;">
+        <!-- LLM Cache -->
+        <div style="padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px;">
+            <h3 style="font-size: 0.85rem; margin-bottom: 0.5rem;">
+                LLM Cache
+                {% if infra.cache.enabled %}
+                    <span class="badge badge-green" style="font-size: 0.6rem;">ON</span>
+                {% else %}
+                    <span class="badge badge-amber" style="font-size: 0.6rem;">OFF</span>
+                {% endif %}
+            </h3>
+            {% if infra.cache.enabled %}
+            <div style="display: flex; gap: 1rem;">
+                <div class="stat">
+                    <div class="stat-value mono" style="font-size: 1.1rem;">{{ infra.cache.hits }}</div>
+                    <div class="stat-label">Hits</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value mono" style="font-size: 1.1rem;">{{ "%.0f"|format(infra.cache.hit_rate * 100) }}%</div>
+                    <div class="stat-label">Hit Rate</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value mono text-green" style="font-size: 1.1rem;">${{ "%.2f"|format(infra.cache.estimated_savings_usd) }}</div>
+                    <div class="stat-label">Saved</div>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-muted" style="font-size: 0.78rem;">Redis not connected</p>
+            {% endif %}
+        </div>
+
+        <!-- Circuit Breakers -->
+        <div style="padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px;">
+            <h3 style="font-size: 0.85rem; margin-bottom: 0.5rem;">Circuit Breakers</h3>
+            {% if infra.circuits %}
+                {% for name, info in infra.circuits.items() %}
+                <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0;">
+                    <span class="badge {% if info.state == 'closed' %}badge-green{% elif info.state == 'half_open' %}badge-amber{% else %}badge-rose{% endif %}" style="font-size: 0.6rem; width: 60px; text-align: center;">{{ info.state|upper }}</span>
+                    <span style="font-size: 0.8rem;">{{ name }}</span>
+                    {% if info.failure_count > 0 %}
+                    <span class="text-muted" style="font-size: 0.7rem;">{{ info.failure_count }} failures</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="text-muted" style="font-size: 0.78rem;">No circuits active</p>
+            {% endif %}
+        </div>
+
+        <!-- Rate Limiting -->
+        <div style="padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px;">
+            <h3 style="font-size: 0.85rem; margin-bottom: 0.5rem;">
+                Rate Limiting
+                <span class="badge badge-green" style="font-size: 0.6rem;">ACTIVE</span>
+            </h3>
+            <div style="font-size: 0.78rem; color: var(--text-secondary);">
+                <div style="padding: 0.2rem 0;">Directives: 5/min, 50/hr</div>
+                <div style="padding: 0.2rem 0;">Research: 10/min, 100/hr</div>
+                <div style="padding: 0.2rem 0;">Sweeps: 3/min, 20/hr</div>
+                <div style="padding: 0.2rem 0;">Content: 5/min, 50/hr</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- ── Knowledge Graph ────────────────────────────────────────────── -->
 {% if knowledge_highlights %}
 <div class="card">

@@ -86,6 +86,20 @@ def index():
         except Exception:
             pass
 
+        # Infrastructure stats (cache, circuits)
+        infra_stats = {}
+        try:
+            from llm.cache import get_cache
+            infra_stats["cache"] = get_cache().get_stats()
+        except Exception:
+            infra_stats["cache"] = {"enabled": False}
+
+        try:
+            from utils.circuit_breaker import get_all_circuit_stats
+            infra_stats["circuits"] = get_all_circuit_stats()
+        except Exception:
+            infra_stats["circuits"] = {}
+
         # Scheduler status
         scheduler_info = {}
         try:
@@ -143,6 +157,7 @@ def index():
             "latest_research": latest_research,
             "latest_feeds": latest_feeds,
             "knowledge_highlights": knowledge_highlights,
+            "infra": infra_stats,
         }
 
         return render_template("dashboard.html", **context)

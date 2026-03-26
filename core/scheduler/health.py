@@ -69,6 +69,8 @@ class HealthChecker:
         checks = []
 
         checks.append(self.check_database())
+        checks.append(self.check_redis())
+        checks.append(self.check_circuit_breakers())
         checks.append(self.check_budget_status())
         checks.append(self.check_lieutenant_health())
         checks.append(self.check_memory_usage())
@@ -321,6 +323,79 @@ class HealthChecker:
             health=health_report,
             active_tasks=0,
         )
+
+    def check_redis(self) -> HealthCheckResult:
+        """Check Redis connectivity and LLM cache stats."""
+        start = time.time()
+        try:
+            from llm.cache import get_cache
+            cache = get_cache()
+            response_time = (time.time() - start) * 1000
+
+            if not cache.enabled:
+                return HealthCheckResult(
+                    check_name="redis",
+                    status="degraded",
+                    message="Redis disabled — LLM cache inactive",
+                    response_time_ms=response_time,
+                    details=cache.get_stats(),
+                )
+
+            stats = cache.get_stats()
+            return HealthCheckResult(
+                check_name="redis",
+                status="healthy",
+                message=f"Redis connected — {stats['hits']} hits, {stats['hit_rate']:.0%} rate, ~${stats['estimated_savings_usd']:.2f} saved",
+                response_time_ms=response_time,
+                details=stats,
+            )
+        except Exception as e:
+            return HealthCheckResult(
+                check_name="redis",
+                status="degraded",
+                message=f"Redis check failed: {e}",
+                response_time_ms=(time.time() - start) * 1000,
+            )
+
+    def check_circuit_breakers(self) -> HealthCheckResult:
+        """Check circuit breaker states for LLM providers."""
+        try:
+            from utils.circuit_breaker import get_all_circuit_stats
+
+            stats = get_all_circuit_stats()
+            if not stats:
+                return HealthCheckResult(
+                    check_name="circuit_breakers",
+                    status="healthy",
+                    message="No circuits initialized yet",
+                    details={},
+                )
+
+            open_circuits = [
+                name for name, info in stats.items()
+                if info.get("state") == "open"
+            ]
+
+            if open_circuits:
+                return HealthCheckResult(
+                    check_name="circuit_breakers",
+                    status="unhealthy",
+                    message=f"Open circuits: {', '.join(open_circuits)}",
+                    details=stats,
+                )
+
+            return HealthCheckResult(
+                check_name="circuit_breakers",
+                status="healthy",
+                message=f"{len(stats)} circuit(s), all closed",
+                details=stats,
+            )
+        except Exception as e:
+            return HealthCheckResult(
+                check_name="circuit_breakers",
+                status="degraded",
+                message=f"Circuit breaker check failed: {e}",
+            )
 
     def _persist_checks(self, checks: list[HealthCheckResult]) -> None:
         """Save health check results to database."""

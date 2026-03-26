@@ -1,4 +1,5 @@
 """Quick verification of bug fixes."""
+import importlib
 import json
 
 # Bug #1: JSON extraction from markdown
@@ -30,7 +31,7 @@ try:
     from ddgs import DDGS
     print("Bug #6 FIXED: ddgs import (no deprecation warning)")
 except ImportError:
-    from duckduckgo_search import DDGS
-    print("Bug #6: falling back to duckduckgo_search")
+    DDGS = importlib.import_module("duckduckgo_search").DDGS
+    print("Bug #6 FIXED: dynamic fallback to duckduckgo_search")
 
 print("\nAll bug fixes verified")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from flask import Blueprint, jsonify, request, current_app
+from web.middleware.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__)
@@ -112,6 +113,7 @@ def api_create_directive():
 
 
 @api_bp.route("/directives/<directive_id>/execute", methods=["POST"])
+@rate_limit(requests_per_minute=5, requests_per_hour=50)
 def api_execute_directive(directive_id: str):
     """Execute a directive in a background thread.
 
@@ -597,11 +599,33 @@ def api_budget():
 
 @api_bp.route("/health")
 def api_health():
-    """System health check."""
+    """Comprehensive system health — DB, Redis, circuits, cache, budget, fleet."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
     from core.scheduler.health import HealthChecker
     checker = HealthChecker(empire_id)
-    return jsonify(checker.run_all_checks())
+    report = checker.run_all_checks()
+
+    # Append infrastructure stats
+    try:
+        from llm.cache import get_cache
+        report["cache"] = get_cache().get_stats()
+    except Exception:
+        report["cache"] = {"enabled": False}
+
+    try:
+        from utils.circuit_breaker import get_all_circuit_stats
+        report["circuits"] = get_all_circuit_stats()
+    except Exception:
+        report["circuits"] = {}
+
+    try:
+        from web.middleware.rate_limit import get_rate_limiter
+        limiter = get_rate_limiter()
+        report["rate_limiter"] = {"enabled": limiter.config.enabled}
+    except Exception:
+        report["rate_limiter"] = {"enabled": False}
+
+    return jsonify(report)
 
 
 # ── Replication ────────────────────────────────────────────────────────
@@ -743,6 +767,7 @@ def api_scrape_and_store():
 
 
 @api_bp.route("/sweep", methods=["POST"])
+@rate_limit(requests_per_minute=3, requests_per_hour=20)
 def api_intelligence_sweep():
     """Run an intelligence sweep — proactive discovery across AI sources."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
@@ -776,6 +801,7 @@ def api_sweep_discoveries():
 # ── Content Pipeline ───────────────────────────────────────────────────
 
 @api_bp.route("/content/generate", methods=["POST"])
+@rate_limit(requests_per_minute=5, requests_per_hour=50)
 def api_generate_content():
     """Generate formatted content on a topic.
 
@@ -904,6 +930,7 @@ def api_content_templates():
 
 
 @api_bp.route("/research", methods=["POST"])
+@rate_limit(requests_per_minute=10, requests_per_hour=100)
 def api_research_topic():
     """Search, scrape, and synthesize research on a topic.
 
