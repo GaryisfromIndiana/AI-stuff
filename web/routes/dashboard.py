@@ -101,10 +101,30 @@ def index():
         except Exception:
             pass
 
+        # Fleet stats for performance bars
+        fleet_stats = []
+        try:
+            from db.repositories.lieutenant import LieutenantRepository
+            lt_repo = LieutenantRepository(session)
+            lts = lt_repo.get_by_empire(empire_id, status="active")
+            fleet_stats = [
+                {
+                    "name": lt.name,
+                    "domain": lt.domain,
+                    "performance": lt.performance_score,
+                    "tasks": lt.tasks_completed + lt.tasks_failed,
+                    "cost": lt.total_cost_usd,
+                }
+                for lt in sorted(lts, key=lambda x: x.performance_score, reverse=True)
+            ]
+        except Exception:
+            pass
+
         context = {
             "health": health,
             "scheduler": scheduler_info,
             "recent_discoveries": recent_discoveries,
+            "fleet_stats": fleet_stats,
             "active_directives": [
                 {"id": d.id, "title": d.title, "status": d.status, "priority": d.priority}
                 for d in active_directives

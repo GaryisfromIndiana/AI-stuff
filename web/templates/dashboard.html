@@ -3,31 +3,26 @@
 {% block content %}
 <div class="page-header">
     <h1>Dashboard</h1>
-    <p>What Empire knows — system status and latest research
-    {% if scheduler %}
-    <span style="margin-left: 1rem;">
+    <p>
+        {% if scheduler %}
         {% if scheduler.running %}
-            <span class="badge badge-green">Scheduler Running</span>
-            <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;">{{ scheduler.total_ticks }} ticks, {{ scheduler.total_jobs }} jobs</span>
+            <span class="badge badge-green">Autonomous</span>
+            <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;">{{ scheduler.total_ticks }} ticks · {{ scheduler.total_jobs }} jobs · {{ scheduler.errors }} errors</span>
         {% else %}
-            <span class="badge badge-amber">Scheduler Paused</span>
+            <span class="badge badge-amber">Manual Mode</span>
         {% endif %}
-    </span>
-    {% endif %}
+        {% endif %}
     </p>
 </div>
 
 {% if health %}
+<!-- ── Top Stats ──────────────────────────────────────────────────── -->
 <div class="grid grid-4" style="margin-bottom: 1.5rem;">
     <div class="card stat">
         <div class="stat-value {% if health.get('health', {}).get('status') == 'healthy' %}text-green{% elif health.get('health', {}).get('status') == 'degraded' %}text-amber{% else %}text-rose{% endif %}">
-            {{ health.get('health', {}).get('status', 'unknown')|upper }}
+            {{ health.get('health', {}).get('status', '?')|upper }}
         </div>
         <div class="stat-label">System Health</div>
-    </div>
-    <div class="card stat">
-        <div class="stat-value">{{ health.get('lieutenants', {}).get('active', 0) }}</div>
-        <div class="stat-label">Active Lieutenants</div>
     </div>
     <div class="card stat">
         <div class="stat-value">{{ health.get('knowledge', {}).get('entities', 0) }}</div>
@@ -37,62 +32,90 @@
         <div class="stat-value">{{ health.get('memory', {}).get('entries', 0) }}</div>
         <div class="stat-label">Memories</div>
     </div>
+    <div class="card stat">
+        <div class="stat-value mono">${{ "%.2f"|format(budget.daily_spend) }}</div>
+        <div class="stat-label">Today's Spend</div>
+    </div>
 </div>
 {% endif %}
 
-<div class="grid grid-2">
+<!-- ── Fleet + Budget Row ─────────────────────────────────────────── -->
+<div class="grid grid-2" style="margin-bottom: 1rem;">
     <div class="card">
-        <h2>Budget</h2>
-        {% if budget %}
-        <div class="grid grid-2" style="margin-bottom: 1rem;">
-            <div class="stat">
-                <div class="stat-value mono">${{ "%.4f"|format(budget.daily_spend) }}</div>
-                <div class="stat-label">Today's Spend</div>
+        <h2>Lieutenant Fleet</h2>
+        <div style="margin-top: 0.75rem;">
+        {% if fleet_stats %}
+            {% for lt in fleet_stats %}
+            <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border);">
+                <div style="width: 120px; font-weight: 500; font-size: 0.85rem;">{{ lt.name[:15] }}</div>
+                <span class="badge badge-purple" style="font-size: 0.6rem; width: 70px; text-align: center;">{{ lt.domain }}</span>
+                <div style="flex: 1;">
+                    <div class="progress-bar" style="height: 6px;">
+                        <div class="progress-bar-fill" style="width: {{ (lt.performance * 100)|int }}%; background: {% if lt.performance >= 0.8 %}var(--green){% elif lt.performance >= 0.6 %}var(--amber){% else %}var(--rose){% endif %};"></div>
+                    </div>
+                </div>
+                <span class="mono text-muted" style="font-size: 0.72rem; width: 40px;">{{ "%.0f"|format(lt.performance * 100) }}%</span>
+                <span class="mono" style="font-size: 0.72rem; width: 35px;">{{ lt.tasks }}</span>
             </div>
-            <div class="stat">
-                <div class="stat-value mono">${{ "%.2f"|format(budget.daily_remaining) }}</div>
-                <div class="stat-label">Daily Remaining</div>
-            </div>
-        </div>
-        {% for alert in budget.get('alerts', []) %}
-        <div class="alert alert-warning">{{ alert.message }}</div>
-        {% endfor %}
+            {% endfor %}
         {% endif %}
+        </div>
     </div>
 
     <div class="card">
-        <h2>Active Directives</h2>
+        <h2>Budget</h2>
+        {% if budget %}
+        <div class="grid grid-2" style="margin: 0.75rem 0;">
+            <div class="stat">
+                <div class="stat-value mono" style="font-size: 1.2rem;">${{ "%.2f"|format(budget.daily_spend) }}</div>
+                <div class="stat-label">Daily</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value mono" style="font-size: 1.2rem;">${{ "%.2f"|format(budget.daily_remaining) }}</div>
+                <div class="stat-label">Remaining</div>
+            </div>
+        </div>
+        <div class="progress-bar" style="height: 8px; margin-bottom: 0.75rem;">
+            {% set pct = (budget.daily_spend / (budget.daily_spend + budget.daily_remaining) * 100) if (budget.daily_spend + budget.daily_remaining) > 0 else 0 %}
+            <div class="progress-bar-fill" style="width: {{ pct|int }}%; background: {% if pct > 80 %}var(--rose){% elif pct > 50 %}var(--amber){% else %}var(--green){% endif %};"></div>
+        </div>
+        {% for alert in budget.get('alerts', []) %}
+        <div class="alert {% if alert.severity == 'critical' %}alert-error{% else %}alert-warning{% endif %}" style="padding: 0.4rem 0.75rem; font-size: 0.8rem;">{{ alert.message }}</div>
+        {% endfor %}
+        {% endif %}
+
+        <h3 style="margin-top: 1rem;">Active Directives</h3>
         {% if active_directives %}
-        <table>
-            <thead><tr><th>Title</th><th>Status</th><th>Priority</th></tr></thead>
-            <tbody>
-            {% for d in active_directives %}
-            <tr>
-                <td><a href="/directives/{{ d.id }}">{{ d.title }}</a></td>
-                <td><span class="badge badge-blue">{{ d.status }}</span></td>
-                <td>{{ d.priority }}</td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
+        {% for d in active_directives %}
+        <div style="padding: 0.3rem 0; border-bottom: 1px solid var(--border);">
+            <a href="/directives/{{ d.id }}" style="font-size: 0.85rem;">{{ d.title[:40] }}</a>
+            <span class="badge badge-blue" style="margin-left: 0.5rem; font-size: 0.6rem;">{{ d.status }}</span>
+        </div>
+        {% endfor %}
         {% else %}
-        <p class="text-muted">No active directives</p>
+        <p class="text-muted" style="font-size: 0.82rem; margin-top: 0.5rem;">No active directives</p>
         {% endif %}
     </div>
 </div>
 
+<!-- ── Completed Research ─────────────────────────────────────────── -->
 {% if recent_completed %}
-<div class="card" style="margin-top: 1rem;">
+<div class="card" style="margin-bottom: 1rem;">
     <h2>Completed Research</h2>
     <table>
-        <thead><tr><th>Title</th><th>Quality</th><th>Cost</th><th>Report</th></tr></thead>
+        <thead><tr><th>Title</th><th>Quality</th><th>Cost</th><th></th></tr></thead>
         <tbody>
         {% for d in recent_completed %}
         <tr>
-            <td><a href="/directives/{{ d.id }}">{{ d.title }}</a></td>
-            <td>{{ "%.2f"|format(d.quality or 0) }}</td>
+            <td><a href="/directives/{{ d.id }}">{{ d.title[:50] }}</a></td>
+            <td>
+                <div class="progress-bar" style="width: 50px; display: inline-block; vertical-align: middle;">
+                    <div class="progress-bar-fill" style="width: {{ ((d.quality or 0) * 100)|int }}%; background: var(--green);"></div>
+                </div>
+                {{ "%.0f"|format((d.quality or 0) * 100) }}%
+            </td>
             <td class="mono">${{ "%.4f"|format(d.cost or 0) }}</td>
-            <td><a href="/directives/{{ d.id }}" class="btn" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">View</a></td>
+            <td><a href="/api/content/render/{{ d.id }}" class="btn" style="padding: 0.15rem 0.4rem; font-size: 0.7rem;">Report</a></td>
         </tr>
         {% endfor %}
         </tbody>
@@ -100,80 +123,75 @@
 </div>
 {% endif %}
 
-{% if latest_research %}
-<div class="card" style="margin-top: 1rem;">
-    <h2>Latest Research & Findings</h2>
-    {% for entry in latest_research %}
-    <div style="padding: 0.75rem 0; border-bottom: 1px solid var(--border);">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <strong>{{ entry.title or entry.content[:60] }}</strong>
-            <span class="text-muted" style="font-size: 0.75rem;">{{ entry.created_at[:10] if entry.created_at else '' }}</span>
+<!-- ── Latest Research + Discoveries Row ──────────────────────────── -->
+<div class="grid grid-2" style="margin-bottom: 1rem;">
+    {% if latest_research %}
+    <div class="card">
+        <h2>Latest Findings</h2>
+        {% for entry in latest_research[:5] %}
+        <div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+            <strong style="font-size: 0.85rem;">{{ entry.title[:55] or entry.content[:55] }}</strong>
+            <span class="text-muted" style="font-size: 0.7rem; margin-left: 0.3rem;">{{ entry.created_at[:10] if entry.created_at else '' }}</span>
+            <p style="color: var(--text-secondary); font-size: 0.78rem; margin-top: 0.15rem;">
+                {{ entry.content[:150] }}{% if entry.content|length > 150 %}...{% endif %}
+            </p>
         </div>
-        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.25rem;">
-            {{ entry.content[:250] }}{% if entry.content|length > 250 %}...{% endif %}
-        </p>
-        {% if entry.tags %}
-        <div style="margin-top: 0.25rem;">
-            {% for tag in entry.tags[:4] %}
-            <span class="badge badge-purple" style="margin-right: 0.25rem;">{{ tag }}</span>
-            {% endfor %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if recent_discoveries %}
+    <div class="card">
+        <h2>Recent Discoveries</h2>
+        {% for entry in recent_discoveries[:5] %}
+        <div style="padding: 0.4rem 0; border-bottom: 1px solid var(--border);">
+            <strong style="font-size: 0.85rem;">{{ entry.title[:55] or entry.content[:55] }}</strong>
+            {% if entry.tags %}
+            <div style="margin-top: 0.1rem;">
+                {% for tag in entry.tags[:3] %}
+                <span class="badge badge-blue" style="font-size: 0.55rem; margin-right: 0.15rem;">{{ tag }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
         </div>
-        {% endif %}
+        {% endfor %}
     </div>
-    {% endfor %}
-</div>
-{% endif %}
-
-{% if latest_feeds %}
-<div class="card" style="margin-top: 1rem;">
-    <h2>Latest from AI Feeds</h2>
-    {% for entry in latest_feeds %}
-    <div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-        <a href="{{ entry.url }}" style="font-weight: 500;">{{ entry.title[:80] }}</a>
-        <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;">{{ entry.source }}</span>
-        <p style="color: var(--text-secondary); font-size: 0.82rem; margin-top: 0.15rem;">
-            {{ entry.summary[:150] }}{% if entry.summary|length > 150 %}...{% endif %}
-        </p>
-    </div>
-    {% endfor %}
-</div>
-{% endif %}
-
-{% if recent_discoveries %}
-<div class="card" style="margin-top: 1rem;">
-    <h2>Recent Discoveries</h2>
-    {% for entry in recent_discoveries %}
-    <div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-        <strong>{{ entry.title or entry.content[:60] }}</strong>
-        <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;">{{ entry.created_at[:10] if entry.created_at else '' }}</span>
-        {% if entry.tags %}
-        <div style="margin-top: 0.15rem;">
-            {% for tag in entry.tags[:3] %}
-            <span class="badge badge-blue" style="font-size: 0.6rem; margin-right: 0.2rem;">{{ tag }}</span>
-            {% endfor %}
+    {% elif latest_feeds %}
+    <div class="card">
+        <h2>AI Feed</h2>
+        {% for entry in latest_feeds[:5] %}
+        <div style="padding: 0.4rem 0; border-bottom: 1px solid var(--border);">
+            <a href="{{ entry.url }}" style="font-size: 0.85rem; font-weight: 500;">{{ entry.title[:55] }}</a>
+            <span class="text-muted" style="font-size: 0.68rem; margin-left: 0.3rem;">{{ entry.source }}</span>
         </div>
-        {% endif %}
+        {% endfor %}
     </div>
-    {% endfor %}
-    <div style="margin-top: 0.5rem;"><a href="/api/sweep/discoveries" class="btn" style="font-size: 0.8rem;">View All Discoveries →</a></div>
+    {% endif %}
 </div>
-{% endif %}
 
+<!-- ── Knowledge Graph ────────────────────────────────────────────── -->
 {% if knowledge_highlights %}
-<div class="card" style="margin-top: 1rem;">
-    <h2>Knowledge Graph Highlights</h2>
-    <div class="grid grid-3">
+<div class="card">
+    <h2>Knowledge Graph <span class="text-muted" style="font-size: 0.75rem; font-weight: 400;">{{ health.get('knowledge', {}).get('entities', 0) }} entities</span></h2>
+    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem;">
         {% for entity in knowledge_highlights %}
-        <div style="padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px;">
-            <div style="font-weight: 600;">{{ entity.name }}</div>
-            <span class="badge badge-purple" style="font-size: 0.65rem;">{{ entity.type }}</span>
-            <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.25rem;">{{ "%.0f"|format(entity.confidence * 100) }}%</span>
+        <div style="padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-hover);">
+            <span style="font-weight: 600; font-size: 0.82rem;">{{ entity.name }}</span>
+            <span class="badge badge-purple" style="font-size: 0.55rem; margin-left: 0.3rem;">{{ entity.type }}</span>
         </div>
         {% endfor %}
     </div>
     <div style="margin-top: 0.75rem;">
-        <a href="/knowledge" class="btn" style="font-size: 0.8rem;">Explore Knowledge Graph →</a>
+        <a href="/knowledge" class="btn" style="font-size: 0.78rem;">Explore Graph →</a>
     </div>
 </div>
 {% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-refresh dashboard every 60 seconds
+setTimeout(function() { location.reload(); }, 60000);
+</script>
 {% endblock %}
