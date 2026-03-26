@@ -100,7 +100,7 @@ def create_app(config: dict | None = None) -> Flask:
         if not _is_auth_enabled():
             return None
         # Allow login/logout/health/static
-        exempt = ["/login", "/logout", "/static", "/api/health"]
+        exempt = ["/login", "/logout", "/static", "/api/health", "/ping"]
         for path in exempt:
             if request.path.startswith(path):
                 return None
@@ -119,6 +119,11 @@ def create_app(config: dict | None = None) -> Flask:
         if not session.get("authenticated"):
             return redirect("/login")
         return None
+
+    # Simple healthcheck — no DB, no auth, instant response
+    @app.route("/ping")
+    def ping():
+        return "ok", 200
 
     # Context processors
     @app.context_processor
