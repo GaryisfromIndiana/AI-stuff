@@ -192,8 +192,17 @@ def get_cache(redis_url: str = "", enabled: bool = True) -> LLMCache:
     global _cache
     if _cache is None:
         import os
-        url = redis_url or os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        url = redis_url or os.environ.get("REDIS_URL") or os.environ.get("REDIS_PUBLIC_URL") or "redis://localhost:6379/0"
+        logger.info("LLM cache using URL source: %s", "REDIS_URL" if os.environ.get("REDIS_URL") else "REDIS_PUBLIC_URL" if os.environ.get("REDIS_PUBLIC_URL") else "default localhost")
         _cache = LLMCache(redis_url=url, enabled=enabled)
+    # Retry connection if previously failed
+    if not _cache.enabled and not _cache._redis:
+        import os
+        url = os.environ.get("REDIS_URL") or os.environ.get("REDIS_PUBLIC_URL") or ""
+        if url:
+            _cache._redis_url = url
+            _cache.enabled = True
+            _cache._connect()
     return _cache
 
 

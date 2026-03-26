@@ -597,6 +597,23 @@ def api_budget():
 
 # ── Health ─────────────────────────────────────────────────────────────
 
+@api_bp.route("/health/debug")
+def api_health_debug():
+    """Debug endpoint — shows Redis connection info."""
+    import os
+    redis_url = os.environ.get("REDIS_URL", "")
+    redis_public = os.environ.get("REDIS_PUBLIC_URL", "")
+    from llm.cache import get_cache
+    cache = get_cache()
+    return jsonify({
+        "redis_url_set": bool(redis_url),
+        "redis_url_prefix": redis_url[:25] + "..." if redis_url else "not set",
+        "redis_public_url_set": bool(redis_public),
+        "cache_enabled": cache.enabled,
+        "cache_redis_url_prefix": cache._redis_url[:25] + "..." if cache._redis_url else "none",
+    })
+
+
 @api_bp.route("/health")
 def api_health():
     """Comprehensive system health — DB, Redis, circuits, cache, budget, fleet."""
