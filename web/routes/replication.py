@@ -55,7 +55,7 @@ def list_empires():
 @replication_bp.route("/generate", methods=["POST"])
 def generate_empire():
     """Generate a new empire from a template."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     try:
         from core.replication.generator import EmpireGenerator
         gen = EmpireGenerator()
@@ -85,7 +85,7 @@ def list_templates():
 @replication_bp.route("/clone", methods=["POST"])
 def clone_empire():
     """Clone an existing empire."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     try:
         from core.replication.generator import EmpireGenerator
         gen = EmpireGenerator()
@@ -102,7 +102,7 @@ def clone_empire():
 def sync_empires():
     """Trigger cross-empire knowledge sync."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     target_id = data.get("target_empire_id", "")
 
     try:

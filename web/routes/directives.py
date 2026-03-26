@@ -78,7 +78,7 @@ def create_directive():
     empire_id = current_app.config.get("EMPIRE_ID", "")
 
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         from core.directives.manager import DirectiveManager
         dm = DirectiveManager(empire_id)
 
@@ -103,7 +103,6 @@ def execute_directive(directive_id: str):
     try:
         from core.directives.manager import DirectiveManager
         dm = DirectiveManager(empire_id)
-        started = time.time()
         result = dm.execute_directive(directive_id)
         return jsonify(result)
 

@@ -182,15 +182,16 @@ class WarRoomSession:
 
         router = ModelRouter()
         session_db = get_session()
-        lt_repo = LieutenantRepository(session_db)
+        try:
+            lt_repo = LieutenantRepository(session_db)
 
-        for participant in self.participants:
-            db_lt = lt_repo.get(participant["id"])
-            if not db_lt:
-                continue
+            for participant in self.participants:
+                db_lt = lt_repo.get(participant["id"])
+                if not db_lt:
+                    continue
 
-            persona = db_lt.persona_json or {}
-            system_prompt = persona.get("system_prompt_template", f"You are {db_lt.name}, an expert in {db_lt.domain}.")
+                persona = db_lt.persona_json or {}
+                system_prompt = persona.get("system_prompt_template", f"You are {db_lt.name}, an expert in {db_lt.domain}.")
 
             prompt = (
                 f"Create a plan for this directive from your {db_lt.domain} perspective:\n\n"
@@ -230,6 +231,9 @@ class WarRoomSession:
                     "plan": f"Planning error: {e}",
                     "quality": 0.0,
                 })
+
+        finally:
+            session_db.close()
 
         # Synthesize plans
         unified = self._synthesize_plans(directive_title, plans)

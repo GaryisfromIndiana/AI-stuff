@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__)
 
 
-def _get_json_or_400():
-    """Get JSON body or return 400 error."""
-    data = request.get_json()
-    if data is None:
-        return None
+def _get_json_or_400() -> dict:
+    """Get JSON body or abort with 400."""
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        from flask import abort
+        abort(400, description="Request body must be valid JSON")
     return data
 
 
@@ -73,7 +74,7 @@ def api_list_lieutenants():
 def api_create_lieutenant():
     """Create a lieutenant."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     from core.lieutenant.manager import LieutenantManager
     manager = LieutenantManager(empire_id)
     lt = manager.create_lieutenant(
@@ -88,7 +89,7 @@ def api_create_lieutenant():
 def api_lieutenant_task(lt_id: str):
     """Submit a task to a lieutenant."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     from core.lieutenant.manager import LieutenantManager
     from core.ace.engine import TaskInput
     manager = LieutenantManager(empire_id)
@@ -115,7 +116,7 @@ def api_list_directives():
 def api_create_directive():
     """Create a directive."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     from core.directives.manager import DirectiveManager
     dm = DirectiveManager(empire_id)
     result = dm.create_directive(
@@ -135,7 +136,6 @@ def api_execute_directive(directive_id: str):
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
     import threading
-    started = time.time()
 
     def run_directive():
         from core.directives.manager import DirectiveManager
@@ -295,7 +295,7 @@ def api_knowledge_entities():
     entities = graph.find_entities(
         query=request.args.get("q", ""),
         entity_type=request.args.get("type", ""),
-        limit=int(request.args.get("limit", 20)),
+        limit=request.args.get("limit", 20, type=int),
     )
     return jsonify([{"name": e.name, "type": e.entity_type, "confidence": e.confidence, "importance": e.importance} for e in entities])
 
@@ -306,7 +306,7 @@ def api_entity_neighbors(entity_name: str):
     empire_id = current_app.config.get("EMPIRE_ID", "")
     from core.knowledge.graph import KnowledgeGraph
     graph = KnowledgeGraph(empire_id)
-    neighbors = graph.get_neighbors(entity_name, max_depth=int(request.args.get("depth", 2)))
+    neighbors = graph.get_neighbors(entity_name, max_depth=request.args.get("depth", 2, type=int))
     return jsonify([{"name": n.name, "type": n.entity_type, "depth": n.depth} for n in neighbors])
 
 
@@ -427,7 +427,7 @@ def api_compress_memories():
 def api_compress_topic():
     """Compress all memories about a specific topic."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     topic = data.get("topic", "")
     if not topic:
         return jsonify({"error": "Topic required"}), 400
@@ -452,7 +452,7 @@ def api_compression_stats():
 def api_store_temporal():
     """Store a bi-temporal fact."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     from core.memory.bitemporal import BiTemporalMemory
     bt = BiTemporalMemory(empire_id)
     fact = bt.store_fact(
@@ -486,7 +486,7 @@ def api_temporal_query():
         as_of_valid=request.args.get("as_of_valid"),
         as_of_recorded=request.args.get("as_of_recorded"),
         include_superseded=request.args.get("include_superseded", "false").lower() == "true",
-        limit=int(request.args.get("limit", 20)),
+        limit=request.args.get("limit", 20, type=int),
     )
     facts = bt.query(tq)
     return jsonify([{
@@ -558,7 +558,7 @@ def api_memory_search():
     return jsonify(mm.search(
         query=request.args.get("q", ""),
         memory_types=request.args.getlist("type") or None,
-        limit=int(request.args.get("limit", 20)),
+        limit=request.args.get("limit", 20, type=int),
     ))
 
 
@@ -725,7 +725,7 @@ def api_health():
 @api_bp.route("/empires/generate", methods=["POST"])
 def api_generate_empire():
     """Generate a new empire."""
-    data = request.get_json()
+    data = _get_json_or_400()
     from core.replication.generator import EmpireGenerator
     gen = EmpireGenerator()
     result = gen.generate_empire(
@@ -756,7 +756,7 @@ def api_web_search():
     query = request.args.get("q", "")
     if not query:
         return jsonify({"error": "Query parameter 'q' required"}), 400
-    max_results = int(request.args.get("limit", 10))
+    max_results = request.args.get("limit", 10, type=int)
     from core.search.web import WebSearcher
     searcher = WebSearcher(current_app.config.get("EMPIRE_ID", ""))
     result = searcher.search_and_summarize(query, max_results=max_results)
@@ -769,7 +769,7 @@ def api_news_search():
     query = request.args.get("q", "")
     if not query:
         return jsonify({"error": "Query parameter 'q' required"}), 400
-    max_results = int(request.args.get("limit", 10))
+    max_results = request.args.get("limit", 10, type=int)
     time_range = request.args.get("range", "w")
     from core.search.web import WebSearcher
     searcher = WebSearcher(current_app.config.get("EMPIRE_ID", ""))
@@ -785,7 +785,7 @@ def api_news_search():
 def api_ai_search():
     """Search for AI-specific news and developments."""
     topic = request.args.get("topic", "")
-    max_results = int(request.args.get("limit", 10))
+    max_results = request.args.get("limit", 10, type=int)
     from core.search.web import WebSearcher
     searcher = WebSearcher(current_app.config.get("EMPIRE_ID", ""))
     response = searcher.search_ai_news(topic, max_results=max_results)
@@ -802,7 +802,7 @@ def api_paper_search():
     topic = request.args.get("topic", "")
     if not topic:
         return jsonify({"error": "Query parameter 'topic' required"}), 400
-    max_results = int(request.args.get("limit", 10))
+    max_results = request.args.get("limit", 10, type=int)
     from core.search.web import WebSearcher
     searcher = WebSearcher(current_app.config.get("EMPIRE_ID", ""))
     response = searcher.search_ai_papers(topic, max_results=max_results)
@@ -817,7 +817,7 @@ def api_paper_search():
 def api_search_and_store():
     """Search the web and store findings in knowledge graph + memory."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     query = data.get("query", "")
     if not query:
         return jsonify({"error": "Query required"}), 400
@@ -830,7 +830,7 @@ def api_search_and_store():
 @api_bp.route("/scrape", methods=["POST"])
 def api_scrape_url():
     """Scrape a URL and extract content."""
-    data = request.get_json()
+    data = _get_json_or_400()
     url = data.get("url", "")
     if not url:
         return jsonify({"error": "URL required"}), 400
@@ -849,7 +849,7 @@ def api_scrape_url():
 def api_scrape_and_store():
     """Scrape a URL and store in knowledge + memory."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     url = data.get("url", "")
     if not url:
         return jsonify({"error": "URL required"}), 400
@@ -887,7 +887,7 @@ def api_sweep_discoveries():
     empire_id = current_app.config.get("EMPIRE_ID", "")
     from core.search.sweep import IntelligenceSweep
     sweep = IntelligenceSweep(empire_id)
-    return jsonify(sweep.get_recent_discoveries(limit=int(request.args.get("limit", 20))))
+    return jsonify(sweep.get_recent_discoveries(limit=request.args.get("limit", 20, type=int)))
 
 
 # ── Content Pipeline ───────────────────────────────────────────────────
@@ -901,7 +901,7 @@ def api_generate_content():
     Templates: research_briefing, weekly_digest, deep_dive, competitive_analysis, status_report
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     topic = data.get("topic", "")
     if not topic:
         return jsonify({"error": "Topic required"}), 400
@@ -932,7 +932,7 @@ def api_generate_content():
 def api_content_from_directive(directive_id: str):
     """Generate formatted content from a completed directive."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json() or {}
+    data = _get_json_or_400() or {}
     from core.content.generator import ContentGenerator
     gen = ContentGenerator(empire_id)
     content = gen.generate_from_directive(
@@ -996,14 +996,14 @@ def api_stored_reports():
     empire_id = current_app.config.get("EMPIRE_ID", "")
     from core.content.generator import ContentGenerator
     gen = ContentGenerator(empire_id)
-    return jsonify(gen.get_stored_reports(limit=int(request.args.get("limit", 10))))
+    return jsonify(gen.get_stored_reports(limit=request.args.get("limit", 10, type=int)))
 
 
 @api_bp.route("/content/render-topic", methods=["POST"])
 def api_render_topic():
     """Generate and render a report as HTML directly."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     topic = data.get("topic", "")
     template = data.get("template", "research_briefing")
     if not topic:
@@ -1030,7 +1030,7 @@ def api_research_topic():
     Tries multiple sources, prefers open sites, falls back to search snippets.
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = _get_json_or_400()
     topic = data.get("topic", "")
     if not topic:
         return jsonify({"error": "Topic required"}), 400
@@ -1188,7 +1188,7 @@ def api_list_feeds():
 def api_feed_latest():
     """Get latest entries from all feeds."""
     category = request.args.get("category")
-    max_total = int(request.args.get("limit", 20))
+    max_total = request.args.get("limit", 20, type=int)
     from core.search.feeds import FeedReader
     reader = FeedReader(current_app.config.get("EMPIRE_ID", ""))
     entries = reader.fetch_latest(

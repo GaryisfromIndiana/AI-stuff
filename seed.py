@@ -9,11 +9,14 @@ def seed():
 
     with session_scope(engine) as session:
         # Check if already seeded
-        from sqlalchemy import select
+        from sqlalchemy import select, func
         existing = session.execute(select(Empire).where(Empire.id == "empire-alpha")).scalar_one_or_none()
-        if existing:
+        lt_count = session.execute(select(func.count()).select_from(Lieutenant).where(Lieutenant.empire_id == "empire-alpha")).scalar() or 0
+        if existing and lt_count >= 6:
             print("Empire already seeded — skipping")
             return
+        if existing:
+            print(f"Empire exists but only {lt_count} lieutenants — re-seeding lieutenants")
 
         # ── Empire ─────────────────────────────────────────────────────
         empire = Empire(

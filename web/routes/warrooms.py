@@ -59,7 +59,7 @@ def warroom_detail(session_id: str):
 def create_warroom():
     """Create and start a new war room session."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     try:
         from core.warroom.session import WarRoomSession
         session = WarRoomSession(empire_id=empire_id, session_type=data.get("type", "planning"))

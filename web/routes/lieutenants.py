@@ -84,7 +84,7 @@ def create_lieutenant():
     empire_id = current_app.config.get("EMPIRE_ID", "")
 
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         from core.lieutenant.manager import LieutenantManager
         manager = LieutenantManager(empire_id)
 
@@ -134,7 +134,7 @@ def delete_lieutenant(lieutenant_id: str):
 def lieutenant_research(lieutenant_id: str):
     """Trigger research for a lieutenant."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     topic = data.get("topic", "")
 
     if not topic:

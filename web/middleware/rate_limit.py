@@ -46,9 +46,16 @@ class RateLimiter:
             t for t in self._hour_log[client_id] if t > now - 3600
         ]
 
-    def check_rate_limit(self) -> tuple[bool, dict]:
+    def check_rate_limit(
+        self,
+        rpm_override: int | None = None,
+        rph_override: int | None = None,
+    ) -> tuple[bool, dict]:
         if not self.config.enabled:
             return True, {"enabled": False}
+
+        max_rpm = rpm_override or self.config.requests_per_minute
+        max_rph = rph_override or self.config.requests_per_hour
 
         client_id = self._get_client_id()
         self._clean_old_entries(client_id)
@@ -60,14 +67,14 @@ class RateLimiter:
             "client_id": client_id[:32],
             "requests_minute": rpm,
             "requests_hour": rph,
-            "limit_minute": self.config.requests_per_minute,
-            "limit_hour": self.config.requests_per_hour,
+            "limit_minute": max_rpm,
+            "limit_hour": max_rph,
         }
 
-        if rpm >= self.config.requests_per_minute:
+        if rpm >= max_rpm:
             return False, {**info, "blocked": True, "reason": "minute_limit", "retry_after": 60}
 
-        if rph >= self.config.requests_per_hour:
+        if rph >= max_rph:
             return False, {**info, "blocked": True, "reason": "hour_limit", "retry_after": 3600}
 
         now = time.time()
@@ -75,8 +82,8 @@ class RateLimiter:
         self._hour_log[client_id].append(now)
 
         info["allowed"] = True
-        info["remaining_minute"] = self.config.requests_per_minute - rpm - 1
-        info["remaining_hour"] = self.config.requests_per_hour - rph - 1
+        info["remaining_minute"] = max_rpm - rpm - 1
+        info["remaining_hour"] = max_rph - rph - 1
         return True, info
 
 
@@ -103,24 +110,13 @@ def rate_limit(
             ...
     """
     def decorator(f: Callable):
-        # Use the global singleton — override its config temporarily for the check
         @wraps(f)
         def decorated_function(*args, **kwargs):
             limiter = get_rate_limiter()
-
-            # Temporarily adjust limits if custom values provided
-            orig_rpm = limiter.config.requests_per_minute
-            orig_rph = limiter.config.requests_per_hour
-            if requests_per_minute:
-                limiter.config.requests_per_minute = requests_per_minute
-            if requests_per_hour:
-                limiter.config.requests_per_hour = requests_per_hour
-
-            allowed, info = limiter.check_rate_limit()
-
-            # Restore original config
-            limiter.config.requests_per_minute = orig_rpm
-            limiter.config.requests_per_hour = orig_rph
+            allowed, info = limiter.check_rate_limit(
+                rpm_override=requests_per_minute,
+                rph_override=requests_per_hour,
+            )
 
             if not allowed:
                 retry_after = info.get("retry_after", 60)
