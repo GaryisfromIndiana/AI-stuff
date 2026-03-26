@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from flask import Blueprint, render_template, jsonify, request, current_app
 
@@ -99,6 +100,7 @@ def execute_directive(directive_id: str):
     try:
         from core.directives.manager import DirectiveManager
         dm = DirectiveManager(empire_id)
+        started = time.time()
         result = dm.execute_directive(directive_id)
         return jsonify(result)
 

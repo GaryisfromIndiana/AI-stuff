@@ -46,6 +46,7 @@ def force_run_job(job_name: str):
     empire_id = current_app.config.get("EMPIRE_ID", "")
     from core.scheduler.daemon import SchedulerDaemon
     daemon = SchedulerDaemon(empire_id)
+    app_daemon = current_app.config.get("_SCHEDULER_DAEMON")
     result = daemon.force_run(job_name)
     return jsonify(result)
 
@@ -56,6 +57,7 @@ def pause_job(job_name: str):
     empire_id = current_app.config.get("EMPIRE_ID", "")
     from core.scheduler.daemon import SchedulerDaemon
     daemon = SchedulerDaemon(empire_id)
+    app_daemon = current_app.config.get("_SCHEDULER_DAEMON")
     success = daemon.pause_job(job_name)
     return jsonify({"success": success})
 
@@ -77,4 +79,5 @@ def manual_tick():
     from core.scheduler.daemon import SchedulerDaemon
     daemon = SchedulerDaemon(empire_id)
     executed = daemon.tick()
+    app_daemon = current_app.config.get("_SCHEDULER_DAEMON")
     return jsonify({"jobs_executed": executed})

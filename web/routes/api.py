@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import json
 import time
 from flask import Blueprint, jsonify, request, current_app
 
@@ -120,6 +119,7 @@ def api_execute_directive(directive_id: str):
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
     import threading
+    started = time.time()
 
     def run_directive():
         from core.directives.manager import DirectiveManager
