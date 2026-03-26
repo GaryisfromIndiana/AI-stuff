@@ -237,6 +237,24 @@ class SchedulerDaemon:
             description="Auto-spawn lieutenants for uncovered topic clusters",
         ))
 
+        self.register_job(JobConfig(
+            name="iterative_deepening",
+            job_type="iterative_deepening",
+            interval_seconds=28800,  # 8 hours
+            handler=self._run_iterative_deepening,
+            priority=6,
+            description="Deepen high-signal shallow research",
+        ))
+
+        self.register_job(JobConfig(
+            name="shallow_enrichment",
+            job_type="shallow_enrichment",
+            interval_seconds=21600,  # 6 hours
+            handler=self._run_shallow_enrichment,
+            priority=7,
+            description="Enrich low-detail knowledge graph entities",
+        ))
+
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
         with self._lock:
@@ -637,4 +655,36 @@ class SchedulerDaemon:
             return {"spawned": len(spawned), "details": spawned}
         except Exception as e:
             logger.warning("Auto-spawn failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_iterative_deepening(self) -> dict:
+        """Detect high-signal topics and deepen research."""
+        try:
+            from core.research.deepening import IterativeDeepener
+            deepener = IterativeDeepener(self.empire_id)
+            results = deepener.run_deepening_cycle(max_topics=3)
+            return {
+                "topics_deepened": len(results),
+                "new_entities": sum(r.new_entities for r in results),
+                "new_relations": sum(r.new_relations for r in results),
+                "topics": [r.topic for r in results],
+            }
+        except Exception as e:
+            logger.warning("Iterative deepening failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_shallow_enrichment(self) -> dict:
+        """Find and enrich low-detail entities."""
+        try:
+            from core.research.enrichment import ShallowEnricher
+            enricher = ShallowEnricher(self.empire_id)
+            result = enricher.run_enrichment_cycle(max_entities=10)
+            return {
+                "scanned": result.entities_scanned,
+                "enriched": result.enriched,
+                "descriptions_improved": result.descriptions_improved,
+                "fields_added": result.fields_added,
+            }
+        except Exception as e:
+            logger.warning("Shallow enrichment failed: %s", e)
             return {"error": str(e)}

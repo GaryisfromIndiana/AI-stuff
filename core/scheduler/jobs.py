@@ -438,6 +438,59 @@ class DuplicateResolutionJob(BaseJob):
         )
 
 
+class IterativeDeepeningJob(BaseJob):
+    """Detect high-signal shallow findings and trigger deeper research."""
+
+    name = "iterative_deepening"
+    description = "Deepen high-signal shallow research into comprehensive knowledge"
+    interval_seconds = 8 * 3600  # 8 hours
+    priority = 6
+
+    def run(self) -> JobResult:
+        from core.research.deepening import IterativeDeepener
+        deepener = IterativeDeepener(self.empire_id)
+        results = deepener.run_deepening_cycle(max_topics=3)
+        total_entities = sum(r.new_entities for r in results)
+        total_relations = sum(r.new_relations for r in results)
+        total_cost = sum(r.cost_usd for r in results)
+        return JobResult(
+            success=True,
+            data={
+                "topics_deepened": len(results),
+                "new_entities": total_entities,
+                "new_relations": total_relations,
+                "cost_usd": total_cost,
+                "topics": [r.topic for r in results],
+            },
+            items_processed=total_entities,
+        )
+
+
+class ShallowEnrichmentJob(BaseJob):
+    """Find low-detail entities and enrich them with targeted research."""
+
+    name = "shallow_enrichment"
+    description = "Enrich low-detail knowledge graph entities with web research"
+    interval_seconds = 6 * 3600  # 6 hours
+    priority = 7
+
+    def run(self) -> JobResult:
+        from core.research.enrichment import ShallowEnricher
+        enricher = ShallowEnricher(self.empire_id)
+        result = enricher.run_enrichment_cycle(max_entities=10)
+        return JobResult(
+            success=True,
+            data={
+                "scanned": result.entities_scanned,
+                "enriched": result.enriched,
+                "descriptions_improved": result.descriptions_improved,
+                "fields_added": result.fields_added,
+                "cost_usd": result.cost_usd,
+            },
+            items_processed=result.enriched,
+        )
+
+
 # Job registry
 JOB_REGISTRY: dict[str, type[BaseJob]] = {
     "learning_cycle": LearningCycleJob,
@@ -454,6 +507,8 @@ JOB_REGISTRY: dict[str, type[BaseJob]] = {
     "memory_compression": MemoryCompressionJob,
     "quality_scoring": QualityScoringJob,
     "duplicate_resolution": DuplicateResolutionJob,
+    "iterative_deepening": IterativeDeepeningJob,
+    "shallow_enrichment": ShallowEnrichmentJob,
 }
 
 

@@ -1270,3 +1270,98 @@ def api_credibility_tiers():
     """Get all sources organized by tier."""
     from core.search.credibility import get_source_tiers
     return jsonify(get_source_tiers())
+
+
+# ── Iterative Deepening ──────────────────────────────────────────────
+
+@api_bp.route("/deepening/candidates")
+def api_deepening_candidates():
+    """Find topics that warrant deeper research."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    try:
+        from core.research.deepening import IterativeDeepener
+        deepener = IterativeDeepener(empire_id)
+        candidates = deepener.detect_candidates(max_candidates=10)
+        return jsonify([{
+            "topic": c.topic,
+            "entity_names": c.entity_names[:10],
+            "current_depth": c.current_depth,
+            "signal_score": c.signal_score,
+            "trigger_reason": c.trigger_reason,
+        } for c in candidates])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/deepening/run", methods=["POST"])
+@rate_limit(requests_per_minute=5)
+def api_deepening_run():
+    """Trigger an iterative deepening cycle."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json(silent=True) or {}
+    max_topics = data.get("max_topics", 3)
+    try:
+        from core.research.deepening import IterativeDeepener
+        deepener = IterativeDeepener(empire_id)
+        results = deepener.run_deepening_cycle(max_topics=max_topics)
+        return jsonify({
+            "topics_deepened": len(results),
+            "results": [{
+                "topic": r.topic,
+                "depth": r.depth,
+                "new_entities": r.new_entities,
+                "new_relations": r.new_relations,
+                "queries_run": r.queries_run,
+                "cost_usd": r.cost_usd,
+                "duration_seconds": r.duration_seconds,
+            } for r in results],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Shallow Enrichment ───────────────────────────────────────────────
+
+@api_bp.route("/enrichment/targets")
+def api_enrichment_targets():
+    """Find knowledge graph entities needing enrichment."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    try:
+        from core.research.enrichment import ShallowEnricher
+        enricher = ShallowEnricher(empire_id)
+        targets = enricher.find_targets(max_targets=20)
+        return jsonify([{
+            "entity_id": t.entity_id,
+            "entity_name": t.entity_name,
+            "entity_type": t.entity_type,
+            "completeness": t.completeness,
+            "priority": t.priority,
+            "missing_fields": t.missing_fields[:5],
+            "reason": t.reason,
+        } for t in targets])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/enrichment/run", methods=["POST"])
+@rate_limit(requests_per_minute=5)
+def api_enrichment_run():
+    """Trigger a shallow enrichment cycle."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json(silent=True) or {}
+    max_entities = data.get("max_entities", 10)
+    try:
+        from core.research.enrichment import ShallowEnricher
+        enricher = ShallowEnricher(empire_id)
+        result = enricher.run_enrichment_cycle(max_entities=max_entities)
+        return jsonify({
+            "entities_scanned": result.entities_scanned,
+            "enriched": result.enriched,
+            "descriptions_improved": result.descriptions_improved,
+            "fields_added": result.fields_added,
+            "cost_usd": result.cost_usd,
+            "duration_seconds": result.duration_seconds,
+            "errors": result.errors[:5],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

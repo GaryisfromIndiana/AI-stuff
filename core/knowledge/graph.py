@@ -170,6 +170,75 @@ class KnowledgeGraph:
         repo.commit()
         return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}
 
+    def update_entity(self, name: str, description: str = "", **kwargs) -> bool:
+        """Update an existing entity's description or other fields.
+
+        Args:
+            name: Entity name to update.
+            description: New description.
+            **kwargs: Additional fields to update.
+
+        Returns:
+            True if entity was found and updated.
+        """
+        from datetime import datetime, timezone
+        repo = self._get_repo()
+        entity = repo.get_by_name(name, self.empire_id)
+        if not entity:
+            return False
+
+        update_fields = {"updated_at": datetime.now(timezone.utc)}
+        if description:
+            update_fields["description"] = description
+        update_fields.update(kwargs)
+
+        repo.update(entity.id, **update_fields)
+        repo.commit()
+        return True
+
+    def update_entity_attributes(self, name: str, attributes: dict) -> bool:
+        """Merge new attributes into an existing entity's attributes.
+
+        Args:
+            name: Entity name.
+            attributes: Attributes to merge in.
+
+        Returns:
+            True if entity was found and updated.
+        """
+        from datetime import datetime, timezone
+        repo = self._get_repo()
+        entity = repo.get_by_name(name, self.empire_id)
+        if not entity:
+            return False
+
+        merged = dict(entity.attributes_json or {})
+        merged.update(attributes)
+
+        repo.update(entity.id, attributes_json=merged, updated_at=datetime.now(timezone.utc))
+        repo.commit()
+        return True
+
+    def boost_confidence(self, name: str, amount: float = 0.05) -> bool:
+        """Boost an entity's confidence score by a small amount.
+
+        Args:
+            name: Entity name.
+            amount: Amount to boost (capped at 1.0).
+
+        Returns:
+            True if entity was found and updated.
+        """
+        repo = self._get_repo()
+        entity = repo.get_by_name(name, self.empire_id)
+        if not entity:
+            return False
+
+        new_confidence = min(1.0, entity.confidence + amount)
+        repo.update(entity.id, confidence=new_confidence)
+        repo.commit()
+        return True
+
     # Bidirectional relation labels
     INVERSE_RELATIONS: dict[str, str] = {
         "created_by": "created",
