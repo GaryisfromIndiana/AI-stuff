@@ -187,10 +187,12 @@ class LLMCache:
 _cache: Optional[LLMCache] = None
 
 
-def get_cache(redis_url: str = "redis://localhost:6379/0", enabled: bool = True) -> LLMCache:
+def get_cache(redis_url: str = "", enabled: bool = True) -> LLMCache:
     global _cache
     if _cache is None:
-        _cache = LLMCache(redis_url=redis_url, enabled=enabled)
+        import os
+        url = redis_url or os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        _cache = LLMCache(redis_url=url, enabled=enabled)
     return _cache
 
 
