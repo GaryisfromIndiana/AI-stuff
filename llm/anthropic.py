@@ -32,6 +32,9 @@ class AnthropicClient(LLMClient):
             api_key = get_settings().anthropic_api_key
         self.client = anthropic.Anthropic(api_key=api_key)
         self._default_model = "claude-sonnet-4-20250514"
+        # Tighter rate limits to avoid 429s (shared across threads in this worker)
+        from llm.base import RateLimiter
+        self._rate_limiter = RateLimiter(requests_per_minute=30, tokens_per_minute=80_000)
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         """Send a completion request to Claude.
@@ -73,7 +76,17 @@ class AnthropicClient(LLMClient):
         start_time = time.time()
         last_error = None
 
-        for attempt in range(3):
+        # Rate limiter enforcement — wait if needed before making request
+        estimated_tokens = sum(len(m.content) // 4 for m in request.messages) + request.max_tokens
+        while not self._rate_limiter.can_proceed(estimated_tokens):
+            wait = self._rate_limiter.wait_time()
+            if wait > 0:
+                logger.debug("Rate limit backpressure: waiting %.1fs", wait)
+                time.sleep(min(wait, 5.0))
+            else:
+                break
+
+        for attempt in range(5):
             try:
                 response = self.client.messages.create(**kwargs)
                 latency_ms = (time.time() - start_time) * 1000
@@ -118,8 +131,12 @@ class AnthropicClient(LLMClient):
 
             except anthropic.RateLimitError as e:
                 last_error = e
-                wait = min(2 ** attempt * 2, 30)
-                logger.warning("Rate limited by Anthropic, waiting %ds (attempt %d)", wait, attempt + 1)
+                import random
+                # Exponential backoff with jitter to avoid thundering herd
+                base_wait = min(2 ** attempt * 5, 60)
+                jitter = random.uniform(0, base_wait * 0.5)
+                wait = base_wait + jitter
+                logger.warning("Rate limited by Anthropic, waiting %.1fs (attempt %d)", wait, attempt + 1)
                 time.sleep(wait)
 
             except anthropic.InternalServerError as e:

@@ -1058,7 +1058,7 @@ def api_content_templates():
 
 
 @api_bp.route("/research", methods=["POST"])
-@rate_limit(requests_per_minute=10, requests_per_hour=100)
+@rate_limit(requests_per_minute=5, requests_per_hour=60)
 def api_research_topic():
     """Search, scrape, and synthesize research on a topic.
 
