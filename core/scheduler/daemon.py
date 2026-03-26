@@ -164,6 +164,61 @@ class SchedulerDaemon:
             description="Archive and cleanup old data",
         ))
 
+        # ── Additional autonomous jobs ─────────────────────────────────
+        self.register_job(JobConfig(
+            name="intelligence_sweep",
+            job_type="intelligence_sweep",
+            interval_seconds=43200,  # 12 hours
+            handler=self._run_intelligence_sweep,
+            priority=4,
+            description="Proactive discovery across AI sources",
+        ))
+
+        self.register_job(JobConfig(
+            name="quality_scoring",
+            job_type="quality_scoring",
+            interval_seconds=21600,  # 6 hours
+            handler=self._run_quality_scoring,
+            priority=5,
+            description="8-dimension entity quality scoring",
+        ))
+
+        self.register_job(JobConfig(
+            name="duplicate_resolution",
+            job_type="duplicate_resolution",
+            interval_seconds=14400,  # 4 hours
+            handler=self._run_duplicate_resolution,
+            priority=5,
+            description="3-stage fuzzy entity deduplication",
+        ))
+
+        self.register_job(JobConfig(
+            name="memory_compression",
+            job_type="memory_compression",
+            interval_seconds=43200,  # 12 hours
+            handler=self._run_memory_compression,
+            priority=6,
+            description="LLM-powered memory compression",
+        ))
+
+        self.register_job(JobConfig(
+            name="autonomous_research",
+            job_type="autonomous_research",
+            interval_seconds=21600,  # 6 hours
+            handler=self._run_autonomous_research,
+            priority=4,
+            description="Gap-driven autonomous research",
+        ))
+
+        self.register_job(JobConfig(
+            name="content_generation",
+            job_type="content_generation",
+            interval_seconds=86400,  # 24 hours
+            handler=self._run_content_generation,
+            priority=7,
+            description="Auto-generate research digest",
+        ))
+
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
         with self._lock:
@@ -457,3 +512,78 @@ class SchedulerDaemon:
         mm = MemoryManager(self.empire_id)
         cleanup = mm.cleanup()
         return cleanup
+
+    def _run_intelligence_sweep(self) -> dict:
+        """Proactive discovery across AI sources."""
+        try:
+            from core.search.sweep import IntelligenceSweep
+            sweep = IntelligenceSweep(self.empire_id)
+            results = sweep.run_sweep()
+            return {"discoveries": len(results) if isinstance(results, list) else 0}
+        except Exception as e:
+            logger.warning("Intelligence sweep failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_quality_scoring(self) -> dict:
+        """Score entity quality across 8 dimensions."""
+        try:
+            from core.knowledge.quality import EntityQualityScorer
+            scorer = EntityQualityScorer(self.empire_id)
+            scored = scorer.score_all()
+            return {"scored": scored}
+        except Exception as e:
+            logger.warning("Quality scoring failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_duplicate_resolution(self) -> dict:
+        """3-stage fuzzy entity deduplication."""
+        try:
+            from core.knowledge.resolution import EntityResolver
+            resolver = EntityResolver(self.empire_id)
+            merged = resolver.resolve_all()
+            return {"merged": merged}
+        except Exception as e:
+            logger.warning("Duplicate resolution failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_memory_compression(self) -> dict:
+        """LLM-powered memory compression."""
+        try:
+            from core.memory.compression import MemoryCompressor
+            compressor = MemoryCompressor(self.empire_id)
+            compressed = compressor.compress_old_memories()
+            return {"compressed": compressed}
+        except Exception as e:
+            logger.warning("Memory compression failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_autonomous_research(self) -> dict:
+        """Gap-driven autonomous research by lieutenants."""
+        try:
+            from core.lieutenant.manager import LieutenantManager
+            manager = LieutenantManager(self.empire_id)
+            lts = manager.list_lieutenants(status="active")
+            researched = 0
+            for lt_info in lts[:3]:  # Top 3 lieutenants research gaps
+                try:
+                    lt = manager.get_lieutenant(lt_info["id"])
+                    if lt and hasattr(lt, "research_knowledge_gaps"):
+                        lt.research_knowledge_gaps(max_gaps=2)
+                        researched += 1
+                except Exception as e:
+                    logger.debug("Lt %s gap research failed: %s", lt_info.get("name", "?"), e)
+            return {"lieutenants_researched": researched}
+        except Exception as e:
+            logger.warning("Autonomous research failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_content_generation(self) -> dict:
+        """Auto-generate a research digest from recent findings."""
+        try:
+            from core.content.generator import ContentGenerator
+            gen = ContentGenerator(self.empire_id)
+            report = gen.generate_weekly_digest()
+            return {"report_id": report.get("id", ""), "sections": report.get("sections", 0)}
+        except Exception as e:
+            logger.warning("Content generation failed: %s", e)
+            return {"error": str(e)}
