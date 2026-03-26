@@ -19,6 +19,41 @@ _engine: Engine | None = None
 _session_factory: sessionmaker | None = None
 _scoped_session: scoped_session | None = None
 _lock = threading.Lock()
+_stats_lock = threading.Lock()
+_session_stats = {"opened_total": 0, "closed_total": 0, "active": 0}
+
+
+def _record_session_open() -> None:
+    with _stats_lock:
+        _session_stats["opened_total"] += 1
+        _session_stats["active"] += 1
+
+
+def _record_session_close() -> None:
+    with _stats_lock:
+        _session_stats["closed_total"] += 1
+        _session_stats["active"] = max(0, _session_stats["active"] - 1)
+
+
+class TrackedSession(Session):
+    """Session subclass that tracks open/close counts for debugging."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._close_recorded = False
+        _record_session_open()
+
+    def close(self) -> None:
+        if not self._close_recorded:
+            _record_session_close()
+            self._close_recorded = True
+        super().close()
+
+
+def get_session_stats() -> dict[str, int]:
+    """Get debug stats for SQLAlchemy session lifecycle."""
+    with _stats_lock:
+        return dict(_session_stats)
 
 
 def _configure_sqlite(dbapi_conn: Any, connection_record: Any) -> None:
@@ -78,11 +113,11 @@ def get_engine(db_url: str | None = None, echo: bool = False) -> Engine:
             engine = create_engine(
                 db_url,
                 echo=echo,
-                pool_size=20,
-                max_overflow=40,
+                pool_size=3,
+                max_overflow=5,
                 pool_pre_ping=True,
-                pool_recycle=1800,
-                pool_timeout=30,
+                pool_recycle=300,
+                pool_timeout=10,
             )
 
         _engine = engine
@@ -104,18 +139,20 @@ def get_session_factory(engine: Engine | None = None) -> sessionmaker:
     if _session_factory is not None:
         return _session_factory
 
+    if engine is None:
+        # Resolve engine before acquiring _lock to avoid lock re-entry deadlocks.
+        engine = get_engine()
+
     with _lock:
         if _session_factory is not None:
             return _session_factory
-
-        if engine is None:
-            engine = get_engine()
 
         _session_factory = sessionmaker(
             bind=engine,
             autocommit=False,
             autoflush=False,
             expire_on_commit=False,
+            class_=TrackedSession,
         )
         return _session_factory
 
@@ -134,11 +171,12 @@ def get_scoped_session(engine: Engine | None = None) -> scoped_session:
     if _scoped_session is not None:
         return _scoped_session
 
+    factory = get_session_factory(engine)
+
     with _lock:
         if _scoped_session is not None:
             return _scoped_session
 
-        factory = get_session_factory(engine)
         _scoped_session = scoped_session(factory)
         return _scoped_session
 
