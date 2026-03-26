@@ -179,9 +179,11 @@ class LieutenantManager:
         return result
 
     def find_best_lieutenant(self, task_description: str, task_type: str = "") -> Lieutenant | None:
-        """Find the best lieutenant for a task.
+        """Find the best lieutenant for a task with load balancing.
 
-        Matches based on domain, specializations, and performance.
+        Scoring: domain relevance + specialization match + load balance penalty.
+        Lieutenants with many more tasks than average get penalized to
+        distribute work evenly across the fleet.
         """
         repo = self._get_repo()
         active_lts = repo.get_by_empire(self.empire_id, status="active")
@@ -189,40 +191,54 @@ class LieutenantManager:
         if not active_lts:
             return None
 
+        # Calculate fleet average for load balancing
+        task_counts = [lt.tasks_completed + lt.tasks_failed for lt in active_lts]
+        avg_tasks = sum(task_counts) / len(task_counts) if task_counts else 0
+
         best_score = -1
         best_lt = None
+        desc_lower = task_description.lower()
 
         for db_lt in active_lts:
             score = 0.0
+            lt_tasks = db_lt.tasks_completed + db_lt.tasks_failed
 
-            # Domain match
-            desc_lower = task_description.lower()
+            # Domain match (strongest signal)
             if db_lt.domain and db_lt.domain.lower() in desc_lower:
-                score += 0.3
+                score += 0.35
 
             # Specialization match
             specs = db_lt.specializations_json or []
-            for spec in specs:
-                if spec.lower() in desc_lower:
-                    score += 0.15
+            matched_specs = sum(1 for spec in specs if spec.lower() in desc_lower)
+            score += min(0.3, matched_specs * 0.1)
 
             # Task type match
             if task_type:
                 type_domain_map = {
                     "research": ["research", "data_science"],
-                    "analysis": ["strategy", "finance", "data_science"],
-                    "code": ["technology"],
+                    "analysis": ["strategy", "finance", "data_science", "industry"],
+                    "code": ["technology", "tooling"],
                     "content": ["content"],
                     "security": ["security"],
                 }
                 matching_domains = type_domain_map.get(task_type, [])
                 if db_lt.domain in matching_domains:
-                    score += 0.2
+                    score += 0.15
 
-            # Performance bonus
-            score += db_lt.performance_score * 0.2
+            # Performance bonus (small — don't let it dominate)
+            score += db_lt.performance_score * 0.1
 
-            # Workload penalty (if currently busy)
+            # Load balancing penalty — penalize lieutenants with above-average tasks
+            if avg_tasks > 0 and lt_tasks > avg_tasks:
+                overload_ratio = lt_tasks / avg_tasks
+                penalty = min(0.4, (overload_ratio - 1) * 0.15)
+                score -= penalty
+
+            # Bonus for underutilized lieutenants
+            if avg_tasks > 0 and lt_tasks < avg_tasks * 0.5:
+                score += 0.15
+
+            # Currently busy penalty
             if db_lt.current_task_id:
                 score -= 0.1
 
