@@ -5,10 +5,10 @@ description = "Self-upgrading multi-agent AI system"
 requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0",
+    "gunicorn>=22.0",
     "sqlalchemy>=2.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
-    "apscheduler>=3.10",
     "anthropic>=0.40",
     "openai>=1.0",
     "python-dotenv>=1.0",
@@ -17,6 +17,7 @@ dependencies = [
     "feedparser>=6.0",
     "psycopg2-binary>=2.9",
     "markdown>=3.5",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]

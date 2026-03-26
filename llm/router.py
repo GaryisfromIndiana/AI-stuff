@@ -442,7 +442,7 @@ class ModelRouter:
             return
         try:
             from core.routing.budget import BudgetManager
-            bm = BudgetManager(self._empire_id if hasattr(self, '_empire_id') else "")
+            bm = BudgetManager(self._empire_id)
             bm.record_spend(
                 cost_usd=response.cost_usd,
                 model=model_key,

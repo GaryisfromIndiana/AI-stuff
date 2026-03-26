@@ -67,7 +67,7 @@ class RetryStats:
 
 # Model escalation ladder
 MODEL_ESCALATION = [
-    "claude-haiku-3.5",    # Tier 4 — cheapest
+    "claude-haiku-4.5",    # Tier 4 — cheapest
     "gpt-4o-mini",         # Tier 4 — alternative
     "claude-sonnet-4",     # Tier 2 — mid-range
     "gpt-4o",              # Tier 2 — alternative
@@ -333,11 +333,13 @@ class RalphWiggumRetry:
 
     def get_stats(self) -> RetryStats:
         """Get retry statistics."""
-        total_attempts = self._total_retries + self._success_after_retry + self._permanent_failures
         return RetryStats(
             total_retries=self._total_retries,
             success_after_retry=self._success_after_retry,
             permanent_failures=self._permanent_failures,
-            avg_attempts_to_success=self._total_retries / max(self._success_after_retry, 1),
+            avg_attempts_to_success=(
+                self._total_retries / self._success_after_retry
+                if self._success_after_retry > 0 else 0.0
+            ),
             model_escalation_count=self._escalation_count,
         )

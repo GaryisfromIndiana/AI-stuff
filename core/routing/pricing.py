@@ -308,14 +308,14 @@ class PricingEngine:
         # Model selection by complexity
         complexity_model_map = {
             "simple": "gpt-4o-mini",
-            "moderate": "claude-haiku-3.5",
+            "moderate": "claude-haiku-4.5",
             "complex": "claude-sonnet-4",
             "expert": "claude-opus-4",
         }
 
         for task in tasks:
             complexity = task.get("complexity", "moderate")
-            model = complexity_model_map.get(complexity, "claude-haiku-3.5")
+            model = complexity_model_map.get(complexity, "claude-haiku-4.5")
 
             estimate = self.estimate_task_cost(
                 task_type=task.get("task_type", "general"),

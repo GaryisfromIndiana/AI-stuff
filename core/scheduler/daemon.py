@@ -257,10 +257,22 @@ class SchedulerDaemon:
                     self._total_errors += 1
                     logger.error("Job %s failed: %s", job.name, e)
 
-                    # Disable job after 5 consecutive errors
-                    if job.consecutive_errors >= 5:
+                    # Disable job after 20 consecutive errors (auto-re-enables after 10 ticks)
+                    if job.consecutive_errors >= 20:
                         job.enabled = False
+                        job.metadata_json = job.metadata_json or {}
+                        job.metadata_json["disabled_at_tick"] = self._tick_count
                         logger.warning("Job %s disabled after %d consecutive errors", job.name, job.consecutive_errors)
+
+            # Auto-re-enable disabled jobs after 10 ticks (~50 min)
+            for job in self._jobs.values():
+                if not job.enabled:
+                    meta = getattr(job, "metadata_json", None) or {}
+                    disabled_at = meta.get("disabled_at_tick", 0)
+                    if self._tick_count - disabled_at >= 10:
+                        job.enabled = True
+                        job.consecutive_errors = 0
+                        logger.info("Job %s auto-re-enabled after cooldown", job.name)
 
         return executed
 
@@ -309,7 +321,7 @@ class SchedulerDaemon:
             uptime_seconds=uptime,
             jobs_registered=len(self._jobs),
             jobs_active=active_jobs,
-            last_tick=str(self._tick_count),
+            last_tick=datetime.now(timezone.utc).isoformat(),
             total_ticks=self._tick_count,
             total_job_runs=self._total_job_runs,
             errors=self._total_errors,

@@ -248,11 +248,8 @@ class AnthropicClient(LLMClient):
         Uses the Anthropic token counting API if available,
         falls back to heuristic estimation.
         """
-        try:
-            result = self.client.count_tokens(text)
-            return result
-        except Exception:
-            return estimate_tokens(text)
+        # Anthropic SDK 0.40+ removed client.count_tokens(); use heuristic
+        return estimate_tokens(text)
 
     def count_message_tokens(
         self,

@@ -187,7 +187,7 @@ class DirectiveIntake:
     def _recommend_models(self, complexity: str) -> list[str]:
         """Recommend models based on complexity."""
         model_map = {
-            "simple": ["gpt-4o-mini", "claude-haiku-3.5"],
+            "simple": ["gpt-4o-mini", "claude-haiku-4.5"],
             "moderate": ["claude-sonnet-4", "gpt-4o"],
             "complex": ["claude-sonnet-4", "claude-opus-4"],
             "expert": ["claude-opus-4"],

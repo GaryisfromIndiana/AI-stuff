@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir . && pip install --no-cache-dir redis gunicorn
+RUN pip install --no-cache-dir .
 
 # Copy application
 COPY . .

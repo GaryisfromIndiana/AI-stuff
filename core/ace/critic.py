@@ -73,7 +73,7 @@ class Critic:
         min_quality: float = 0.6,
     ):
         self.router = router or ModelRouter()
-        self._default_model = default_model or "claude-haiku-3.5"
+        self._default_model = default_model or "claude-haiku-4.5"
         self._min_quality = min_quality
 
     def evaluate(

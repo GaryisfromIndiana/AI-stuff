@@ -62,7 +62,7 @@ MODEL_CATALOG: dict[str, LLMModelConfig] = {
         tier=2,
         capabilities=["reasoning", "code", "analysis", "creative", "vision"],
     ),
-    "claude-haiku-3.5": LLMModelConfig(
+    "claude-haiku-4.5": LLMModelConfig(
         model_id="claude-haiku-4-5-20251001",
         provider="anthropic",
         cost_per_1k_input=0.001,
@@ -161,9 +161,9 @@ class QualitySettings(BaseSettings):
 class ACESettings(BaseSettings):
     """ACE engine settings."""
 
-    default_planning_model: str = "claude-haiku-3.5"  # Planning is simple — use Haiku
+    default_planning_model: str = "claude-haiku-4.5"  # Planning is simple — use Haiku
     default_execution_model: str = "claude-sonnet-4"  # Execution needs quality — use Sonnet
-    default_critic_model: str = "claude-haiku-3.5"    # Critic is simple evaluation — use Haiku
+    default_critic_model: str = "claude-haiku-4.5"    # Critic is simple evaluation — use Haiku
     max_pipeline_iterations: int = Field(default=1, ge=1, le=10)
     enable_parallel_execution: bool = True
     max_parallel_tasks: int = Field(default=5, ge=1, le=20)
