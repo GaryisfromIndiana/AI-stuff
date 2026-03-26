@@ -228,6 +228,15 @@ class SchedulerDaemon:
             description="Deep LLM audit for contaminated entities",
         ))
 
+        self.register_job(JobConfig(
+            name="auto_spawn",
+            job_type="auto_spawn",
+            interval_seconds=86400,  # 24 hours
+            handler=self._run_auto_spawn,
+            priority=7,
+            description="Auto-spawn lieutenants for uncovered topic clusters",
+        ))
+
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
         with self._lock:
@@ -605,4 +614,15 @@ class SchedulerDaemon:
             return maintainer.deep_llm_audit(batch_size=20)
         except Exception as e:
             logger.warning("LLM audit failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_auto_spawn(self) -> dict:
+        """Auto-spawn lieutenants for uncovered topic clusters."""
+        try:
+            from core.knowledge.maintenance import KnowledgeMaintainer
+            maintainer = KnowledgeMaintainer(self.empire_id)
+            spawned = maintainer.auto_spawn_lieutenants(max_spawns=2)
+            return {"spawned": len(spawned), "details": spawned}
+        except Exception as e:
+            logger.warning("Auto-spawn failed: %s", e)
             return {"error": str(e)}
