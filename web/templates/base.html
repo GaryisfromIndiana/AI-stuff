@@ -121,6 +121,9 @@
                 <div class="nav-section-title">System</div>
                 <a href="/settings" class="nav-link">Settings</a>
                 <a href="/settings/health" class="nav-link">Health</a>
+                {% if auth_enabled %}
+                <a href="/logout" class="nav-link" style="color: var(--rose); margin-top: 1rem;">Logout</a>
+                {% endif %}
             </div>
         </nav>
 

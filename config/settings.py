@@ -241,6 +241,11 @@ class Settings(BaseSettings):
     flask_host: str = "0.0.0.0"
     flask_port: int = Field(default=5000, ge=1024, le=65535)
 
+    # ── Authentication ──────────────────────────────────────────────
+    auth_username: str = "admin"
+    auth_password: str = ""  # Set EMPIRE_AUTH_PASSWORD to enable auth
+    api_key: str = ""  # Set EMPIRE_API_KEY for API access
+
     # ── Empire identity ────────────────────────────────────────────────
     empire_id: str = "empire-alpha"
     empire_name: str = "Alpha Empire"

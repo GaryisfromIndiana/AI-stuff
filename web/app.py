@@ -70,12 +70,61 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(budget_bp, url_prefix="/budget")
     app.register_blueprint(replication_bp, url_prefix="/network")
 
+    # ── Authentication ──────────────────────────────────────────────
+    from web.middleware.auth import require_login, require_api_auth, _is_auth_enabled, _check_password, _get_auth_config
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        from flask import render_template, session as flask_session
+        if request.method == "POST":
+            username = request.form.get("username", "")
+            password = request.form.get("password", "")
+            auth_user, _, _ = _get_auth_config()
+            if username == auth_user and _check_password(password):
+                flask_session["authenticated"] = True
+                return redirect("/")
+            return render_template("login.html", error="Invalid credentials")
+        return render_template("login.html")
+
+    @app.route("/logout")
+    def logout():
+        from flask import session as flask_session
+        flask_session.clear()
+        return redirect("/login")
+
+    # Protect all web routes
+    @app.before_request
+    def check_auth():
+        if not _is_auth_enabled():
+            return None
+        # Allow login/logout/health/static
+        exempt = ["/login", "/logout", "/static", "/api/health"]
+        for path in exempt:
+            if request.path.startswith(path):
+                return None
+        # API routes use API key auth
+        if request.path.startswith("/api/"):
+            api_key = request.headers.get("X-API-Key", "")
+            if api_key:
+                from web.middleware.auth import _check_api_key
+                if _check_api_key(api_key):
+                    return None
+                return jsonify({"error": "Invalid API key"}), 401
+            if not session.get("authenticated"):
+                return jsonify({"error": "Unauthorized"}), 401
+            return None
+        # Web routes use session auth
+        if not session.get("authenticated"):
+            return redirect("/login")
+        return None
+
     # Context processors
     @app.context_processor
     def inject_globals():
         return {
             "empire_name": app.config.get("EMPIRE_NAME", "Empire"),
             "empire_id": app.config.get("EMPIRE_ID", ""),
+            "auth_enabled": _is_auth_enabled(),
         }
 
     # Error handlers
