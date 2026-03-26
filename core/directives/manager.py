@@ -4,11 +4,29 @@ from __future__ import annotations
 
 import logging
 import time
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    try:
+        payload = {
+            "sessionId": "121c22",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open("/Users/asd/Desktop/financial modeling/.cursor/debug-121c22.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
 
 
 @dataclass
@@ -136,6 +154,16 @@ class DirectiveManager:
         db_directive = repo.get(directive_id)
         if not db_directive:
             return {"error": "Directive not found"}
+        run_id = f"directive:{directive_id}"
+        # region agent log
+        _debug_log(
+            run_id,
+            "H1",
+            "core/directives/manager.py:execute_directive:start",
+            "execute_directive entered",
+            {"directive_id": directive_id, "initial_status": getattr(db_directive, "status", None)},
+        )
+        # endregion
 
         start_time = time.time()
         repo.start_directive(directive_id)
@@ -166,6 +194,18 @@ class DirectiveManager:
                 session.add_participant(lt_id, lt_info.get("name", ""), lt_info.get("domain", ""))
 
         plan_result = session.run_planning_phase(db_directive.title, db_directive.description)
+        # region agent log
+        _debug_log(
+            run_id,
+            "H2",
+            "core/directives/manager.py:execute_directive:post_planning",
+            "planning phase completed",
+            {
+                "participants": len(getattr(session, "participants", [])),
+                "plan_keys": list(plan_result.keys()) if isinstance(plan_result, dict) else [],
+            },
+        )
+        # endregion
 
         # 2. Wave execution
         repo.update(directive_id, status="executing", pipeline_stage="executing")
@@ -216,6 +256,15 @@ class DirectiveManager:
             waves = [w for w in waves if w.get("tasks")]
 
             logger.info("Built %d waves with %d tasks from directive", len(waves), len(default_tasks))
+        # region agent log
+        _debug_log(
+            run_id,
+            "H2",
+            "core/directives/manager.py:execute_directive:waves_ready",
+            "waves prepared",
+            {"wave_count": len(waves), "task_count": sum(len(w.get("tasks", [])) for w in waves)},
+        )
+        # endregion
 
         wave_results = []
         total_cost = 0.0
@@ -281,22 +330,40 @@ class DirectiveManager:
                 "success_rate": sum(1 for t in wave_task_results if t.get("success")) / max(len(wave_task_results), 1),
             })
 
-        # 3. Persist War Room session (before retrospective so it's saved even if retro hangs)
-        session.close_session()
-
-        # 4. Retrospective (best-effort — don't block completion)
-        retro_result = {}
+        # 3. Persist War Room session
+        # region agent log
+        _debug_log(
+            run_id,
+            "H3",
+            "core/directives/manager.py:execute_directive:before_close_session",
+            "about to close war room session",
+            {"transcript_len": len(getattr(session, "transcript", [])), "total_cost_so_far": total_cost},
+        )
+        # endregion
         try:
-            retro_result = session.run_retrospective({
-                "directive": db_directive.title,
-                "waves": wave_results,
-                "total_cost": total_cost,
-            })
+            session.close_session()
+            # region agent log
+            _debug_log(
+                run_id,
+                "H3",
+                "core/directives/manager.py:execute_directive:after_close_session",
+                "war room close_session returned",
+                {"session_state": str(getattr(session, "state", "")), "session_id": getattr(session, "session_id", "")},
+            )
+            # endregion
         except Exception as e:
-            logger.warning("Retrospective failed: %s", e)
-            retro_result = {"error": str(e)}
+            logger.warning("War Room close failed: %s", e)
+            # region agent log
+            _debug_log(
+                run_id,
+                "H3",
+                "core/directives/manager.py:execute_directive:close_session_exception",
+                "war room close_session raised exception",
+                {"error": str(e)},
+            )
+            # endregion
 
-        # 5. Complete
+        # 4. Complete (retrospective skipped — runs async via scheduler if needed)
         repo = self._get_repo()
         repo.update(
             directive_id,
@@ -306,6 +373,15 @@ class DirectiveManager:
             total_cost_usd=total_cost,
         )
         repo.commit()
+        # region agent log
+        _debug_log(
+            run_id,
+            "H4",
+            "core/directives/manager.py:execute_directive:directive_completed",
+            "directive status committed as completed",
+            {"total_cost": total_cost, "pipeline_stage": "delivered"},
+        )
+        # endregion
 
         duration = time.time() - start_time
         logger.info("Directive completed: %s (cost=$%.4f, duration=%.1fs)", db_directive.title, total_cost, duration)
@@ -314,7 +390,7 @@ class DirectiveManager:
             "directive_id": directive_id,
             "status": "completed",
             "wave_results": wave_results,
-            "retrospective": retro_result,
+            "retrospective": {},
             "total_cost": total_cost,
             "duration_seconds": duration,
         }

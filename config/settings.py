@@ -161,9 +161,9 @@ class QualitySettings(BaseSettings):
 class ACESettings(BaseSettings):
     """ACE engine settings."""
 
-    default_planning_model: str = "claude-sonnet-4"
-    default_execution_model: str = "claude-sonnet-4"
-    default_critic_model: str = "claude-haiku-3.5"
+    default_planning_model: str = "claude-haiku-3.5"  # Planning is simple — use Haiku
+    default_execution_model: str = "claude-sonnet-4"  # Execution needs quality — use Sonnet
+    default_critic_model: str = "claude-haiku-3.5"    # Critic is simple evaluation — use Haiku
     max_pipeline_iterations: int = Field(default=1, ge=1, le=10)
     enable_parallel_execution: bool = True
     max_parallel_tasks: int = Field(default=5, ge=1, le=20)

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
 
 
 class SessionState(str, Enum):
@@ -339,6 +341,7 @@ Respond as JSON:
         """Close the session and produce a summary."""
         self.state = SessionState.CLOSED
         duration = time.time() - self._start_time
+        run_id = f"directive:{self.directive_id or 'none'}"
 
         summary = SessionSummary(
             session_id=self.session_id,
@@ -494,6 +497,7 @@ Respond as JSON:
         try:
             from db.engine import session_scope
             from db.models import WarRoom
+            run_id = f"directive:{self.directive_id or 'none'}"
 
             # Ensure all data is JSON-serializable (no datetime objects, no custom classes)
             def to_serializable(obj):
