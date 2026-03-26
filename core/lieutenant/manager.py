@@ -44,7 +44,9 @@ class LieutenantManager:
     def __init__(self, empire_id: str = "", ace_engine: ACEEngine | None = None):
         self.empire_id = empire_id
         self.ace = ace_engine or ACEEngine()
-        self._lieutenants: dict[str, Lieutenant] = {}  # In-memory cache
+        self._lieutenants: dict[str, Lieutenant] = {}  # In-memory instance cache
+        self._lt_list_cache: list[dict] | None = None  # Cached list results
+        self._cache_timestamp: float = 0.0
         self._repo = None
 
     def _get_repo(self):
@@ -131,11 +133,21 @@ class LieutenantManager:
         status: str | None = None,
         domain: str | None = None,
     ) -> list[dict]:
-        """List all lieutenants with optional filters."""
+        """List all lieutenants with TTL caching (60s)."""
+        import time as _time
+
+        now = _time.time()
+        if (
+            self._lt_list_cache is not None
+            and now - self._cache_timestamp < 60
+            and not status and not domain  # Only use cache for unfiltered queries
+        ):
+            return self._lt_list_cache
+
         repo = self._get_repo()
         db_lts = repo.get_by_empire(self.empire_id, status=status, domain=domain)
 
-        return [
+        result = [
             {
                 "id": lt.id,
                 "name": lt.name,
@@ -149,6 +161,18 @@ class LieutenantManager:
             }
             for lt in db_lts
         ]
+
+        # Cache unfiltered results
+        if not status and not domain:
+            self._lt_list_cache = result
+            self._cache_timestamp = now
+
+        return result
+
+    def invalidate_cache(self) -> None:
+        """Invalidate the lieutenant list cache."""
+        self._lt_list_cache = None
+        self._cache_timestamp = 0.0
 
     def activate_lieutenant(self, lieutenant_id: str) -> bool:
         """Activate an inactive lieutenant."""
