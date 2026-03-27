@@ -234,21 +234,169 @@ Respond as JSON:
         return reviews
 
     def _execute_approved(self, approved: list[dict]) -> list[dict]:
-        """Execute approved proposals."""
+        """Execute approved proposals — actually apply changes to the system.
+
+        Proposal types and what they do:
+        - knowledge_update: extract entities/relations from proposal and add to KG
+        - process_improvement: update lieutenant persona, specializations, or priorities
+        - optimization: store as design memory for future task execution
+        """
         executed = []
         for review in approved:
             proposal = review.get("proposal", {})
+            title = proposal.get("title", "Untitled")
+            description = proposal.get("description", "")
+            lt_id = proposal.get("lieutenant_id", "")
+            proposal_type = proposal.get("proposal_type", "optimization")
+
             try:
-                # For now, store the execution record
+                changes_made = []
+
+                # 1. Knowledge updates: extract and store entities from the proposal
+                if proposal_type in ("knowledge_update", "optimization"):
+                    kg_changes = self._apply_knowledge_update(description)
+                    if kg_changes:
+                        changes_made.append(f"Added {kg_changes} entities to knowledge graph")
+
+                # 2. Process improvements: update lieutenant config
+                if proposal_type == "process_improvement" and lt_id:
+                    lt_changes = self._apply_lieutenant_update(lt_id, description)
+                    if lt_changes:
+                        changes_made.extend(lt_changes)
+
+                # 3. Always store as design memory for future use
+                from core.memory.manager import MemoryManager
+                mm = MemoryManager(self.empire_id)
+                mm.store(
+                    content=f"Applied evolution proposal: {title}\n\n{description[:2000]}",
+                    memory_type="design",
+                    lieutenant_id=lt_id or None,
+                    title=f"Evolution: {title[:80]}",
+                    category="evolution_applied",
+                    importance=0.75,
+                    tags=["evolution", "applied", proposal_type],
+                    source_type="evolution",
+                )
+                changes_made.append("Stored as design memory")
+
                 executed.append({
-                    "title": proposal.get("title", ""),
+                    "title": title,
                     "status": "applied",
                     "notes": review.get("notes", ""),
+                    "changes": changes_made,
                 })
+                logger.info("Applied evolution proposal: %s (%s)", title, ", ".join(changes_made))
+
             except Exception as e:
-                logger.warning("Failed to execute proposal: %s", e)
+                logger.warning("Failed to execute proposal '%s': %s", title, e)
 
         return executed
+
+    def _apply_knowledge_update(self, description: str) -> int:
+        """Extract entities from a proposal description and add to knowledge graph."""
+        from core.knowledge.graph import KnowledgeGraph
+
+        graph = KnowledgeGraph(self.empire_id)
+        added = 0
+
+        try:
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+            import json
+
+            router = ModelRouter()
+            request = LLMRequest(
+                messages=[LLMMessage.user(
+                    f"Extract knowledge entities from this improvement proposal. "
+                    f"Return JSON array of objects with name, entity_type, description.\n\n{description[:2000]}"
+                )],
+                system_prompt="Extract structured entities. Return valid JSON only: [{\"name\": \"...\", \"entity_type\": \"...\", \"description\": \"...\"}]",
+                temperature=0.1,
+                max_tokens=800,
+            )
+            response = router.execute(request, TaskMetadata(task_type="extraction", complexity="simple"))
+
+            text = response.content
+            start = text.find("[")
+            end = text.rfind("]") + 1
+            if start >= 0 and end > start:
+                entities = json.loads(text[start:end])
+                for ent in entities[:5]:
+                    if isinstance(ent, dict) and ent.get("name"):
+                        graph.add_entity(
+                            name=ent["name"][:100],
+                            entity_type=ent.get("entity_type", "concept"),
+                            description=ent.get("description", "")[:500],
+                            confidence=0.6,
+                            tags=["evolution_extracted"],
+                        )
+                        added += 1
+        except Exception as e:
+            logger.debug("Knowledge extraction from proposal failed: %s", e)
+
+        return added
+
+    def _apply_lieutenant_update(self, lieutenant_id: str, description: str) -> list[str]:
+        """Update a lieutenant's persona or priorities based on proposal."""
+        from core.lieutenant.manager import LieutenantManager
+
+        changes: list[str] = []
+        lt_manager = LieutenantManager(self.empire_id)
+        lt = lt_manager.get_lieutenant(lieutenant_id)
+        if not lt:
+            return changes
+
+        try:
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+            import json
+
+            router = ModelRouter()
+            request = LLMRequest(
+                messages=[LLMMessage.user(
+                    f"Based on this improvement proposal, suggest updates to a lieutenant's configuration.\n\n"
+                    f"Current persona: {lt.persona.name} — {lt.persona.domain}\n"
+                    f"Current specializations: {lt.persona.specializations}\n"
+                    f"Current learning priorities: {lt.persona.learning_priorities}\n\n"
+                    f"Proposal: {description[:2000]}\n\n"
+                    f"Return JSON: {{\"new_specializations\": [...], \"new_learning_priorities\": [...], \"persona_notes\": \"...\"}}"
+                )],
+                system_prompt="Suggest specific, actionable updates. Return valid JSON only.",
+                temperature=0.2,
+                max_tokens=600,
+            )
+            response = router.execute(request, TaskMetadata(task_type="planning", complexity="simple"))
+
+            text = response.content
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                updates = json.loads(text[start:end])
+
+                new_specs = updates.get("new_specializations", [])
+                if new_specs and isinstance(new_specs, list):
+                    current = lt.persona.specializations or []
+                    added = [s for s in new_specs[:3] if s not in current]
+                    if added:
+                        lt.persona.specializations = current + added
+                        changes.append(f"Added specializations: {added}")
+
+                new_priorities = updates.get("new_learning_priorities", [])
+                if new_priorities and isinstance(new_priorities, list):
+                    lt.persona.learning_priorities = new_priorities[:5]
+                    changes.append(f"Updated learning priorities: {new_priorities[:5]}")
+
+                if changes:
+                    from db.engine import session_scope
+                    from db.repositories.lieutenant import LieutenantRepository
+                    with session_scope() as session:
+                        repo = LieutenantRepository(session)
+                        repo.update(lieutenant_id, persona_json=lt.persona.to_dict())
+
+        except Exception as e:
+            logger.debug("Lieutenant update from proposal failed: %s", e)
+
+        return changes
 
     def _extract_learnings(
         self,

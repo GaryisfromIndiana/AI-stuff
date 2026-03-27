@@ -406,17 +406,94 @@ Respond as JSON:
         return rebuttals
 
     def _score_arguments(self, arguments: list[Argument]) -> list[ScoredArgument]:
-        """Score arguments on multiple dimensions."""
+        """Score arguments — tries LLM scoring, falls back to heuristic."""
+        try:
+            return self._score_arguments_llm(arguments)
+        except Exception as e:
+            logger.debug("LLM argument scoring failed, using heuristic fallback: %s", e)
+            return self._score_arguments_heuristic(arguments)
+
+    def _score_arguments_llm(self, arguments: list[Argument]) -> list[ScoredArgument]:
+        """Score arguments using an LLM for nuanced evaluation."""
+        from llm.base import LLMRequest, LLMMessage
+        from llm.router import TaskMetadata
+
+        router = self._get_router()
+
+        args_text = "\n\n".join(
+            f"### Argument {i+1} by {a.lieutenant_name}\n"
+            f"Position: {a.position}\n"
+            f"Reasoning: {a.reasoning[:400]}\n"
+            f"Evidence: {a.evidence}\n"
+            f"Counterpoints anticipated: {a.counterpoints}"
+            for i, a in enumerate(arguments)
+        )
+
+        prompt = f"""Score each argument on 4 dimensions (0.0-1.0 each):
+- logic_score: How sound is the reasoning?
+- evidence_score: How well-supported with evidence?
+- novelty_score: How original or insightful?
+- persuasion_score: How convincing overall?
+
+Arguments:
+{args_text}
+
+Return valid JSON only:
+[
+  {{"argument_index": 0, "logic_score": 0.0, "evidence_score": 0.0, "novelty_score": 0.0, "persuasion_score": 0.0}}
+]
+"""
+        request = LLMRequest(
+            messages=[LLMMessage.user(prompt)],
+            system_prompt="You are a debate judge. Score arguments fairly and precisely. Return valid JSON only.",
+            temperature=0.2,
+            max_tokens=800,
+        )
+        response = router.execute(request, TaskMetadata(task_type="analysis", complexity="moderate"))
+
+        try:
+            data = json.loads(response.content)
+        except json.JSONDecodeError:
+            from llm.schemas import _find_json_object
+            # Try finding JSON array
+            text = response.content
+            start = text.find("[")
+            end = text.rfind("]") + 1
+            if start >= 0 and end > start:
+                data = json.loads(text[start:end])
+            else:
+                raise ValueError("Could not parse scoring response")
+
+        scored = []
+        for i, arg in enumerate(arguments):
+            score_data = next((d for d in data if d.get("argument_index") == i), {})
+            logic = float(score_data.get("logic_score", 0.5))
+            evidence = float(score_data.get("evidence_score", 0.5))
+            novelty = float(score_data.get("novelty_score", 0.5))
+            persuasion = float(score_data.get("persuasion_score", 0.5))
+
+            scored.append(ScoredArgument(
+                argument=arg,
+                logic_score=logic,
+                evidence_score=evidence,
+                novelty_score=novelty,
+                persuasion_score=persuasion,
+                overall_score=(logic + evidence + novelty + persuasion) / 4,
+            ))
+
+        return scored
+
+    def _score_arguments_heuristic(self, arguments: list[Argument]) -> list[ScoredArgument]:
+        """Score arguments using heuristics (fallback)."""
         scored = []
         for arg in arguments:
-            # Heuristic scoring
             reasoning_len = len(arg.reasoning)
             evidence_count = len(arg.evidence)
             counterpoint_count = len(arg.counterpoints)
 
-            logic_score = min(1.0, reasoning_len / 500)  # Longer reasoning = higher logic
-            evidence_score = min(1.0, evidence_count / 3)  # 3+ pieces = full score
-            novelty_score = 0.5  # Hard to measure without comparison
+            logic_score = min(1.0, reasoning_len / 500)
+            evidence_score = min(1.0, evidence_count / 3)
+            novelty_score = 0.5
             persuasion_score = arg.confidence * 0.7 + min(1.0, counterpoint_count / 2) * 0.3
 
             scored_arg = ScoredArgument(
@@ -432,10 +509,7 @@ Respond as JSON:
         return scored
 
     def check_consensus(self, debate: Debate) -> ConsensusCheck:
-        """Check if consensus has been reached.
-
-        Analyzes positions across rounds for convergence.
-        """
+        """Check if consensus has been reached — tries LLM, falls back to heuristic."""
         if not debate.rounds:
             return ConsensusCheck()
 
@@ -445,8 +519,74 @@ Respond as JSON:
         if not positions:
             return ConsensusCheck()
 
-        # Check if participants are converging
-        # Simple heuristic: check word overlap between positions
+        try:
+            return self._check_consensus_llm(latest_round, positions)
+        except Exception as e:
+            logger.debug("LLM consensus check failed, using heuristic: %s", e)
+            return self._check_consensus_heuristic(latest_round, positions)
+
+    def _check_consensus_llm(self, latest_round: DebateRound, positions: list[str]) -> ConsensusCheck:
+        """Use LLM to evaluate whether positions agree on substance."""
+        from llm.base import LLMRequest, LLMMessage
+        from llm.router import TaskMetadata
+
+        router = self._get_router()
+
+        positions_text = "\n\n".join(
+            f"**{a.lieutenant_name}**: {a.position}\nReasoning: {a.reasoning[:200]}"
+            for a in latest_round.arguments if a.position
+        )
+
+        prompt = f"""Analyze these debate positions for consensus.
+
+{positions_text}
+
+Evaluate:
+1. Do the positions agree on the core substance (even if wording differs)?
+2. What is the level of agreement (0.0-1.0)?
+3. Who (if anyone) is a holdout with a fundamentally different view?
+4. Is a compromise possible?
+
+Return valid JSON:
+{{
+  "reached": true/false,
+  "agreement_level": 0.0-1.0,
+  "consensus_position": "summary of agreed position (if reached)",
+  "holdouts": ["name1"],
+  "compromise_possible": true/false,
+  "compromise_suggestion": "how to bridge remaining gaps"
+}}
+"""
+        request = LLMRequest(
+            messages=[LLMMessage.user(prompt)],
+            system_prompt="You are a neutral debate moderator assessing consensus. Return valid JSON only.",
+            temperature=0.2,
+            max_tokens=600,
+        )
+        response = router.execute(request, TaskMetadata(task_type="analysis", complexity="simple"))
+
+        try:
+            data = json.loads(response.content)
+        except json.JSONDecodeError:
+            text = response.content
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                data = json.loads(text[start:end])
+            else:
+                raise ValueError("Could not parse consensus response")
+
+        return ConsensusCheck(
+            reached=bool(data.get("reached", False)),
+            agreement_level=float(data.get("agreement_level", 0.0)),
+            consensus_position=data.get("consensus_position", ""),
+            holdouts=data.get("holdouts", []),
+            compromise_possible=bool(data.get("compromise_possible", False)),
+            compromise_suggestion=data.get("compromise_suggestion", ""),
+        )
+
+    def _check_consensus_heuristic(self, latest_round: DebateRound, positions: list[str]) -> ConsensusCheck:
+        """Check consensus using word-overlap heuristic (fallback)."""
         position_words = [set(p.lower().split()) for p in positions]
 
         total_overlap = 0
@@ -460,13 +600,10 @@ Respond as JSON:
                 comparisons += 1
 
         agreement_level = total_overlap / max(comparisons, 1)
-
-        # Check confidence levels
         avg_confidence = sum(a.confidence for a in latest_round.arguments) / max(len(latest_round.arguments), 1)
 
         reached = agreement_level > 0.4 and avg_confidence > 0.6
 
-        # Identify holdouts (lowest confidence)
         holdouts = []
         for arg in latest_round.arguments:
             if arg.confidence < 0.5:
