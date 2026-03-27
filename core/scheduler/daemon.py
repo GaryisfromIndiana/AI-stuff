@@ -615,24 +615,130 @@ class SchedulerDaemon:
             return {"error": str(e)}
 
     def _run_autonomous_research(self) -> dict:
-        """Gap-driven autonomous research by lieutenants."""
+        """Gap-driven autonomous research — finds KG gaps and auto-creates directives.
+
+        Flow:
+        1. Identify domains with fewest recent entities (knowledge gaps)
+        2. Use LLM to generate research topics for the weakest domains
+        3. Create and execute directives to fill those gaps
+        """
         try:
+            from core.knowledge.graph import KnowledgeGraph
+            from core.routing.budget import BudgetManager
+
+            # Budget gate — don't research if over 80% of daily budget
+            bm = BudgetManager(self.empire_id)
+            check = bm.check_budget(estimated_cost=0.05)
+            if check.remaining_daily < 0.10:
+                return {"skipped": True, "reason": "budget_low", "remaining": check.remaining_daily}
+
+            graph = KnowledgeGraph(self.empire_id)
+            stats = graph.get_stats()
+
+            # Find domains with least coverage
+            EXPECTED_DOMAINS = {
+                "models": "Latest LLM releases, benchmarks, pricing, architecture comparisons",
+                "research": "Recent AI papers, training techniques, alignment research, scaling laws",
+                "agents": "Multi-agent frameworks, tool use patterns, MCP developments, orchestration",
+                "tooling": "Inference engines, vector databases, deployment tools, MLOps platforms",
+                "industry": "AI company strategy, funding rounds, enterprise adoption trends",
+                "open_source": "Open weight model releases, HuggingFace trends, local inference",
+            }
+
+            # Count entities per domain by checking entity types and descriptions
+            domain_counts = {}
+            for domain in EXPECTED_DOMAINS:
+                try:
+                    entities = graph.find_entities(query=domain, limit=50)
+                    domain_counts[domain] = len(entities) if entities else 0
+                except Exception:
+                    domain_counts[domain] = 0
+
+            if not domain_counts:
+                return {"skipped": True, "reason": "no_domains"}
+
+            # Pick the 2 weakest domains
+            sorted_domains = sorted(domain_counts.items(), key=lambda x: x[1])
+            weak_domains = sorted_domains[:2]
+
+            # Generate research directives for weak domains
+            directives_created = 0
+            topics_researched = []
+
+            for domain, count in weak_domains:
+                try:
+                    topic = self._generate_research_topic(domain, EXPECTED_DOMAINS[domain], count)
+                    if not topic:
+                        continue
+
+                    # Use the research pipeline directly (lighter than a full directive)
+                    from core.search.web import WebSearcher
+                    searcher = WebSearcher(self.empire_id)
+                    result = searcher.research_topic(topic, depth="standard", max_results=5)
+
+                    topics_researched.append({
+                        "domain": domain,
+                        "topic": topic,
+                        "entities_before": count,
+                        "sources": result.get("sources_found", 0),
+                    })
+                    directives_created += 1
+
+                except Exception as e:
+                    logger.debug("Auto-research for %s failed: %s", domain, e)
+
+            # Also let lieutenants research their own gaps
             from core.lieutenant.manager import LieutenantManager
             manager = LieutenantManager(self.empire_id)
             lts = manager.list_lieutenants(status="active")
-            researched = 0
-            for lt_info in lts[:3]:  # Top 3 lieutenants research gaps
+            lt_researched = 0
+            for lt_info in lts[:2]:
                 try:
                     lt = manager.get_lieutenant(lt_info["id"])
                     if lt and hasattr(lt, "research_knowledge_gaps"):
-                        lt.research_knowledge_gaps(max_gaps=2)
-                        researched += 1
+                        lt.research_knowledge_gaps(max_gaps=1)
+                        lt_researched += 1
                 except Exception as e:
                     logger.debug("Lt %s gap research failed: %s", lt_info.get("name", "?"), e)
-            return {"lieutenants_researched": researched}
+
+            return {
+                "topics_researched": topics_researched,
+                "directives_created": directives_created,
+                "lieutenants_researched": lt_researched,
+                "weakest_domains": [d[0] for d in weak_domains],
+            }
         except Exception as e:
             logger.warning("Autonomous research failed: %s", e)
             return {"error": str(e)}
+
+    def _generate_research_topic(self, domain: str, domain_desc: str, current_count: int) -> str:
+        """Use LLM to generate a specific research topic for a weak domain."""
+        try:
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+
+            router = ModelRouter(self.empire_id)
+            prompt = (
+                f"You are an AI research director. The '{domain}' domain currently has {current_count} "
+                f"knowledge entries, which is low.\n\n"
+                f"Domain focus: {domain_desc}\n\n"
+                f"Generate ONE specific, timely research topic that would fill the biggest gap "
+                f"in this domain. Focus on developments from the last 3 months (early 2025).\n\n"
+                f"Respond with ONLY the topic — one sentence, no explanation."
+            )
+
+            response = router.execute(
+                LLMRequest(
+                    messages=[LLMMessage.user(prompt)],
+                    max_tokens=100,
+                    temperature=0.7,
+                ),
+                TaskMetadata(task_type="planning", complexity="simple"),
+            )
+            return response.content.strip().strip('"')
+        except Exception as e:
+            logger.debug("Topic generation failed for %s: %s", domain, e)
+            return ""
 
     def _run_content_generation(self) -> dict:
         """Auto-generate a research digest from recent findings."""

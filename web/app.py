@@ -169,9 +169,9 @@ def create_app(config: dict | None = None) -> Flask:
         logger.error("Server error: %s", e)
         return {"error": "Internal server error"}, 500
 
-    # Start scheduler daemon — every worker gets a daemon object,
-    # but only auto-starts on Postgres. Multiple start() calls are safe
-    # because SchedulerDaemon.start() is a no-op if already running.
+    # Start scheduler daemon in every worker. The advisory lock in tick()
+    # ensures only one worker runs jobs per tick (on Postgres). On SQLite
+    # it's fine — only one process runs anyway.
     import os
     is_worker = os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG")
     if is_worker:
@@ -180,12 +180,8 @@ def create_app(config: dict | None = None) -> Flask:
             empire_id = app.config.get("EMPIRE_ID", "")
             daemon = SchedulerDaemon(empire_id, tick_interval=300)  # 5 min ticks
             app.config["_SCHEDULER_DAEMON"] = daemon
-
-            if "postgresql" in settings.db_url:
-                daemon.start()
-                logger.info("Scheduler daemon STARTED (Postgres — 5 min ticks)")
-            else:
-                logger.info("Scheduler daemon ready (SQLite — use /scheduler/start)")
+            daemon.start()
+            logger.info("Scheduler daemon STARTED (5 min ticks, %d jobs)", len(daemon._jobs))
         except Exception as e:
             logger.warning("Could not create scheduler: %s", e)
 

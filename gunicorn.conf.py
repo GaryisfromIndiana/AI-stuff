@@ -21,8 +21,9 @@ loglevel = os.environ.get("LOG_LEVEL", "info")
 # Graceful restart
 graceful_timeout = 30
 
-# Preload app for faster worker startup and shared memory
-preload_app = True
+# Don't preload — each worker needs its own scheduler thread
+# (threads don't survive fork, so preload kills the scheduler)
+preload_app = False
 
 # Worker lifecycle — recycle workers after N requests to prevent memory leaks
 max_requests = 1000
