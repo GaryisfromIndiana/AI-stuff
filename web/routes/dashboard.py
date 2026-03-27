@@ -100,7 +100,7 @@ def index():
             except Exception:
                 infra_stats["circuits"] = {}
 
-            # Scheduler status
+            # Scheduler status — check all workers' daemons via shared stats
             scheduler_info = {}
             try:
                 daemon = current_app.config.get("_SCHEDULER_DAEMON")
@@ -112,6 +112,23 @@ def index():
                         "total_jobs": status.total_job_runs,
                         "errors": status.errors,
                     }
+                # If this worker's daemon hasn't ticked yet, check DB for scheduler evidence
+                if not scheduler_info.get("total_ticks"):
+                    try:
+                        from sqlalchemy import text
+                        tick_check = session.execute(text(
+                            "SELECT COUNT(*) FROM war_rooms WHERE created_at > datetime('now', '-1 hour')"
+                        )).scalar() or 0
+                        task_check = session.execute(text(
+                            "SELECT COUNT(*) FROM tasks WHERE created_at > datetime('now', '-1 hour')"
+                        )).scalar() or 0
+                        if tick_check or task_check:
+                            scheduler_info["running"] = True
+                            scheduler_info["note"] = "Activity detected (stats from another worker)"
+                            scheduler_info["recent_war_rooms"] = tick_check
+                            scheduler_info["recent_tasks"] = task_check
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -273,6 +290,17 @@ def dashboard_stats():
                         "total_jobs": status.total_job_runs,
                         "errors": status.errors,
                     }
+                if not scheduler_info.get("total_ticks"):
+                    try:
+                        from sqlalchemy import text
+                        task_check = session.execute(text(
+                            "SELECT COUNT(*) FROM tasks WHERE created_at > datetime('now', '-1 hour')"
+                        )).scalar() or 0
+                        if task_check:
+                            scheduler_info["running"] = True
+                            scheduler_info["recent_tasks"] = task_check
+                    except Exception:
+                        pass
             except Exception:
                 pass
 

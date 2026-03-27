@@ -146,11 +146,12 @@ def get_engine(db_url: str | None = None, echo: bool = False) -> Engine:
             engine = create_engine(
                 db_url,
                 echo=echo,
-                pool_size=8,
-                max_overflow=15,
+                pool_size=15,
+                max_overflow=25,
                 pool_pre_ping=True,
                 pool_recycle=300,
                 pool_timeout=20,
+                query_cache_size=500,
             )
 
         _engine = engine
@@ -315,8 +316,34 @@ def init_db(engine: Engine | None = None) -> None:
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
 
+    # Run lightweight migrations for constraint updates
+    _run_constraint_migrations(engine)
+
     # Ensure the default empire record exists (required for FK constraints on budget_logs etc.)
     _ensure_default_empire(engine)
+
+
+def _run_constraint_migrations(engine: Engine) -> None:
+    """Update check constraints that may have changed since last deploy."""
+    try:
+        is_postgres = "postgresql" in str(engine.url)
+        if not is_postgres:
+            return  # SQLite recreates constraints on create_all
+
+        with engine.connect() as conn:
+            # Update directive source constraint to allow god_panel and scheduler
+            try:
+                conn.execute(text("ALTER TABLE directives DROP CONSTRAINT IF EXISTS ck_directive_source"))
+                conn.execute(text(
+                    "ALTER TABLE directives ADD CONSTRAINT ck_directive_source "
+                    "CHECK (source IN ('human', 'evolution', 'autonomous', 'god_panel', 'scheduler'))"
+                ))
+                conn.commit()
+                logger.info("Updated ck_directive_source constraint")
+            except Exception as e:
+                logger.debug("Constraint migration skipped: %s", e)
+    except Exception as e:
+        logger.debug("Constraint migrations skipped: %s", e)
 
 
 def _ensure_default_empire(engine: Engine) -> None:

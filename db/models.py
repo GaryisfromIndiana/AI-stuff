@@ -211,7 +211,7 @@ class Directive(Base):
             name="ck_directive_status",
         ),
         CheckConstraint("priority >= 1 AND priority <= 10", name="ck_directive_priority"),
-        CheckConstraint("source IN ('human', 'evolution', 'autonomous')", name="ck_directive_source"),
+        CheckConstraint("source IN ('human', 'evolution', 'autonomous', 'god_panel', 'scheduler')", name="ck_directive_source"),
     )
 
     @property
