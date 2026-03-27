@@ -265,7 +265,8 @@ def execute_command():
             "- AUDIT: Deep audit of the knowledge graph for quality issues\n"
             "- STATUS: Report full system status and health\n"
             "- CONTENT: Generate a polished report on a topic\n"
-            "- PIPELINE: Full 5-stage research pipeline (search→scrape→extract→deepen→synthesize)\n\n"
+            "- PIPELINE: Full 5-stage research pipeline (search→scrape→extract→deepen→synthesize)\n"
+            "- AUTORESEARCH: Empire finds its own knowledge gaps and autonomously researches to fill them\n\n"
             "IMPORTANT: For research-oriented commands, prefer RESEARCH (engages lieutenants) "
             "over PIPELINE (no lieutenants). Use PIPELINE only when the user specifically wants "
             "raw data extraction. Use DIRECTIVE for complex multi-step tasks. Use WARROOM when "
@@ -434,6 +435,9 @@ def _dispatch_action(
             result["synthesis"] = pipe_result.synthesis[:2000]
         return result
 
+    elif action == "AUTORESEARCH":
+        return _execute_autonomous_gap_research(empire_id, priority)
+
     else:
         # Unknown action — fall back to research
         return _execute_deep_research(
@@ -466,6 +470,146 @@ def list_commands():
     if status_filter:
         commands = [c for c in commands if c["status"] == status_filter]
     return jsonify(commands[:limit])
+
+
+def _execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
+    """Empire finds its own knowledge gaps and researches to fill them.
+
+    Flow:
+    1. Scan KG for domains with least coverage
+    2. Generate research topics for the weakest areas
+    3. Run deep research on each topic
+    4. Repeat for N rounds (configurable by priority)
+    """
+    import json
+    from core.knowledge.graph import KnowledgeGraph
+    from core.routing.budget import BudgetManager
+
+    rounds = min(priority, 5)  # Higher priority = more rounds, max 5
+    total_cost = 0.0
+    topics_researched = []
+
+    DOMAINS = {
+        "models": "Latest LLM releases, benchmarks, pricing, architecture comparisons",
+        "research": "Recent AI papers, training techniques, alignment research, scaling laws",
+        "agents": "Multi-agent frameworks, tool use patterns, MCP developments, orchestration",
+        "tooling": "Inference engines, vector databases, deployment tools, MLOps platforms",
+        "industry": "AI company strategy, funding rounds, enterprise adoption trends",
+        "open_source": "Open weight model releases, HuggingFace trends, local inference",
+    }
+
+    for round_num in range(1, rounds + 1):
+        # Budget check each round
+        bm = BudgetManager(empire_id)
+        check = bm.check_budget(estimated_cost=0.10)
+        if check.remaining_daily < 0.50:
+            logger.info("Autoresearch stopping at round %d — budget low ($%.2f remaining)", round_num, check.remaining_daily)
+            break
+
+        # Find weakest domains
+        graph = KnowledgeGraph(empire_id)
+        domain_counts = {}
+        for domain in DOMAINS:
+            try:
+                entities = graph.find_entities(query=domain, limit=100)
+                domain_counts[domain] = len(entities) if entities else 0
+            except Exception:
+                domain_counts[domain] = 0
+
+        sorted_domains = sorted(domain_counts.items(), key=lambda x: x[1])
+        weak = sorted_domains[:2]  # 2 weakest per round
+
+        for domain, count in weak:
+            try:
+                # Generate topic
+                from llm.router import ModelRouter, TaskMetadata
+                from llm.base import LLMRequest, LLMMessage
+
+                router = ModelRouter(empire_id)
+                topic_prompt = (
+                    f"You are an AI research director. The '{domain}' knowledge domain has {count} entries, "
+                    f"which is {'very low' if count < 20 else 'moderate'}.\n\n"
+                    f"Domain focus: {DOMAINS[domain]}\n\n"
+                    f"Already researched topics this session: {[t['topic'] for t in topics_researched]}\n\n"
+                    f"Generate ONE specific, timely research topic that would fill the biggest gap. "
+                    f"Focus on developments from early 2025. Do NOT repeat already-researched topics.\n\n"
+                    f"Respond with ONLY the topic — one sentence, no explanation."
+                )
+
+                resp = router.execute(
+                    LLMRequest(messages=[LLMMessage.user(topic_prompt)], max_tokens=100, temperature=0.7),
+                    TaskMetadata(task_type="planning", complexity="simple"),
+                )
+                topic = resp.content.strip().strip('"')
+                total_cost += resp.cost_usd
+
+                if not topic:
+                    continue
+
+                # Run deep research on the topic
+                logger.info("Autoresearch round %d: %s (domain=%s, entities=%d)", round_num, topic[:60], domain, count)
+                research_result = _execute_deep_research(
+                    empire_id, topic, f"Autonomous gap research for {domain}: {topic}",
+                    [domain], "", False, priority,
+                )
+                total_cost += research_result.get("research_cost", 0)
+
+                topics_researched.append({
+                    "round": round_num,
+                    "domain": domain,
+                    "topic": topic,
+                    "entities_before": count,
+                    "success": research_result.get("status") == "completed",
+                })
+
+            except Exception as e:
+                logger.warning("Autoresearch failed for %s: %s", domain, e)
+                topics_researched.append({
+                    "round": round_num,
+                    "domain": domain,
+                    "topic": f"Failed: {e}",
+                    "success": False,
+                })
+
+    return {
+        "status": "completed",
+        "rounds_completed": min(round_num, rounds) if topics_researched else 0,
+        "topics_researched": topics_researched,
+        "total_cost": total_cost,
+        "domains_covered": list(set(t["domain"] for t in topics_researched)),
+    }
+
+
+@god_panel_bp.route("/autoresearch", methods=["POST"])
+def trigger_autoresearch():
+    """Trigger autonomous gap research directly via API."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json(silent=True) or {}
+    rounds = min(data.get("rounds", 3), 10)
+
+    command_id = str(uuid.uuid4())[:12]
+    _track_command(command_id, "Autonomous gap research", "AUTORESEARCH", "knowledge gaps")
+
+    app = current_app._get_current_object()
+    def _run(app_ref, cmd_id, eid, pri):
+        with app_ref.app_context():
+            _update_command_status(cmd_id, "running")
+            try:
+                result = _execute_autonomous_gap_research(eid, pri)
+                _complete_command(cmd_id, result)
+            except Exception as e:
+                logger.error("Autoresearch failed: %s", e)
+                _complete_command(cmd_id, error=str(e))
+
+    threading.Thread(target=_run, args=(app, command_id, empire_id, rounds), daemon=True).start()
+
+    return jsonify({
+        "status": "accepted",
+        "command_id": command_id,
+        "rounds": rounds,
+        "poll_url": f"/god/command/{command_id}/status",
+        "message": f"Empire is autonomously researching knowledge gaps ({rounds} rounds)",
+    })
 
 
 def _execute_deep_research(
