@@ -26,6 +26,23 @@ def _get_json_or_400() -> dict:
 def get_empire():
     """Get current empire info."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
+    # #region agent log
+    try:
+        import json as _json, time as _time, os as _os
+        _os.makedirs("/Users/asd/Downloads/Empireisgay-main/.cursor", exist_ok=True)
+        with open("/Users/asd/Downloads/Empireisgay-main/.cursor/debug-b41917.log", "a", encoding="utf-8") as _f:
+            _f.write(_json.dumps({
+                "sessionId": "b41917",
+                "runId": "runtime-2",
+                "hypothesisId": "H7",
+                "location": "web/routes/api.py:get_empire",
+                "message": "api empire endpoint hit",
+                "data": {"empire_id": empire_id},
+                "timestamp": int(_time.time() * 1000),
+            }) + "\n")
+    except Exception:
+        pass
+    # #endregion
     try:
         from db.engine import get_session
         from db.repositories.empire import EmpireRepository
@@ -158,18 +175,76 @@ def api_execute_directive(directive_id: str):
     Returns immediately with status. Poll /directives/<id>/progress for updates.
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
+    app = current_app._get_current_object()
     import threading
 
-    def run_directive():
-        from core.directives.manager import DirectiveManager
-        dm = DirectiveManager(empire_id)
-        try:
-            dm.execute_directive(directive_id)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error("Directive execution failed: %s", e)
+    def run_directive(app_ref, eid, did):
+        with app_ref.app_context():
+            from core.directives.manager import DirectiveManager
+            dm = DirectiveManager(eid)
+            # #region agent log
+            try:
+                import json as _json, time as _time
+                __import__("os").makedirs("/Users/asd/Downloads/Empireisgay-main/.cursor", exist_ok=True)
+                with open("/Users/asd/Downloads/Empireisgay-main/.cursor/debug-b41917.log", "a", encoding="utf-8") as _f:
+                    _f.write(_json.dumps({
+                        "sessionId": "b41917",
+                        "runId": "runtime-1",
+                        "hypothesisId": "H5",
+                        "location": "web/routes/api.py:api_execute_directive:thread_start",
+                        "message": "background directive thread started",
+                        "data": {"directive_id": did, "empire_id": eid},
+                        "timestamp": int(_time.time() * 1000),
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            try:
+                dm.execute_directive(did)
+                # #region agent log
+                try:
+                    import json as _json, time as _time
+                    __import__("os").makedirs("/Users/asd/Downloads/Empireisgay-main/.cursor", exist_ok=True)
+                    with open("/Users/asd/Downloads/Empireisgay-main/.cursor/debug-b41917.log", "a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps({
+                            "sessionId": "b41917",
+                            "runId": "runtime-1",
+                            "hypothesisId": "H5",
+                            "location": "web/routes/api.py:api_execute_directive:thread_done",
+                            "message": "background directive thread completed",
+                            "data": {"directive_id": did},
+                            "timestamp": int(_time.time() * 1000),
+                        }) + "\n")
+                except Exception:
+                    pass
+                # #endregion
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error("Directive execution failed: %s", e)
+                # #region agent log
+                try:
+                    import json as _json, time as _time
+                    __import__("os").makedirs("/Users/asd/Downloads/Empireisgay-main/.cursor", exist_ok=True)
+                    with open("/Users/asd/Downloads/Empireisgay-main/.cursor/debug-b41917.log", "a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps({
+                            "sessionId": "b41917",
+                            "runId": "runtime-1",
+                            "hypothesisId": "H5",
+                            "location": "web/routes/api.py:api_execute_directive:thread_error",
+                            "message": "background directive thread failed",
+                            "data": {"directive_id": did, "error": str(e)[:240]},
+                            "timestamp": int(_time.time() * 1000),
+                        }) + "\n")
+                except Exception:
+                    pass
+                # #endregion
 
-    thread = threading.Thread(target=run_directive, daemon=True, name=f"directive-{directive_id[:8]}")
+    thread = threading.Thread(
+        target=run_directive,
+        args=(app, empire_id, directive_id),
+        daemon=True,
+        name=f"directive-{directive_id[:8]}"
+    )
     thread.start()
 
     return jsonify({"directive_id": directive_id, "status": "started", "message": "Executing in background. Poll /api/directives/{id}/progress for updates."}), 202
@@ -596,6 +671,100 @@ def api_memory_search():
         memory_types=request.args.getlist("type") or None,
         limit=request.args.get("limit", 20, type=int),
     ))
+
+
+@api_bp.route("/memory/purge", methods=["POST"])
+@rate_limit(requests_per_minute=5, requests_per_hour=20)
+def api_memory_purge():
+    """Purge bad/invalid memories matching a pattern.
+
+    Body: {"pattern": "Invalid command", "dry_run": true}
+    """
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json(silent=True) or {}
+    pattern = data.get("pattern", "").strip()
+    dry_run = data.get("dry_run", False)
+
+    if not pattern or len(pattern) < 3:
+        return jsonify({"error": "Pattern must be at least 3 characters"}), 400
+
+    try:
+        from db.engine import get_session
+        from sqlalchemy import text
+
+        session = get_session()
+        try:
+            # Find matching memories
+            result = session.execute(text(
+                "SELECT id, title, content FROM memories "
+                "WHERE empire_id = :eid AND (title LIKE :pat OR content LIKE :pat)"
+            ), {"eid": empire_id, "pat": f"%{pattern}%"})
+            matches = [{"id": r[0], "title": r[1][:80], "preview": r[2][:100]} for r in result]
+
+            if dry_run:
+                return jsonify({"matches": len(matches), "entries": matches, "dry_run": True})
+
+            # Delete matching memories
+            if matches:
+                ids = [m["id"] for m in matches]
+                session.execute(text(
+                    "DELETE FROM memories WHERE id IN :ids"
+                ).bindparams(ids=tuple(ids)))
+                session.commit()
+
+            return jsonify({"purged": len(matches), "entries": matches})
+        finally:
+            session.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/knowledge/purge", methods=["POST"])
+@rate_limit(requests_per_minute=5, requests_per_hour=20)
+def api_knowledge_purge():
+    """Purge bad/invalid KG entities matching a pattern.
+
+    Body: {"pattern": "Invalid", "dry_run": true}
+    """
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json(silent=True) or {}
+    pattern = data.get("pattern", "").strip()
+    dry_run = data.get("dry_run", False)
+
+    if not pattern or len(pattern) < 3:
+        return jsonify({"error": "Pattern must be at least 3 characters"}), 400
+
+    try:
+        from db.engine import get_session
+        from sqlalchemy import text
+
+        session = get_session()
+        try:
+            result = session.execute(text(
+                "SELECT id, name, entity_type, description FROM knowledge_entities "
+                "WHERE empire_id = :eid AND (name LIKE :pat OR description LIKE :pat)"
+            ), {"eid": empire_id, "pat": f"%{pattern}%"})
+            matches = [{"id": r[0], "name": r[1], "type": r[2], "desc": (r[3] or "")[:80]} for r in result]
+
+            if dry_run:
+                return jsonify({"matches": len(matches), "entities": matches, "dry_run": True})
+
+            if matches:
+                ids = [m["id"] for m in matches]
+                # Delete relations first (FK)
+                session.execute(text(
+                    "DELETE FROM knowledge_relations WHERE source_entity_id IN :ids OR target_entity_id IN :ids"
+                ).bindparams(ids=tuple(ids)))
+                session.execute(text(
+                    "DELETE FROM knowledge_entities WHERE id IN :ids"
+                ).bindparams(ids=tuple(ids)))
+                session.commit()
+
+            return jsonify({"purged": len(matches), "entities": matches})
+        finally:
+            session.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Evolution ──────────────────────────────────────────────────────────
