@@ -228,6 +228,40 @@ class ToolRegistry:
 
         self.register(ToolRegistration(
             definition=ToolDefinition(
+                name="search_reddit",
+                description="Search Reddit for discussions, opinions, and community insights. Great for finding real-world experiences, comparisons, and debates about AI topics.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "subreddit": {
+                            "type": "string",
+                            "description": "Limit to a subreddit (e.g. 'MachineLearning', 'LocalLLaMA'). Leave empty for all.",
+                            "default": "",
+                        },
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                        "sort": {
+                            "type": "string",
+                            "enum": ["relevance", "hot", "top", "new", "comments"],
+                            "description": "Sort order (default: relevance)",
+                            "default": "relevance",
+                        },
+                        "time_filter": {
+                            "type": "string",
+                            "enum": ["day", "week", "month", "year", "all"],
+                            "description": "Time filter (default: year)",
+                            "default": "year",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_search_reddit,
+            requires_empire_id=True,
+        ))
+
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
                 name="search_github",
                 description="Search GitHub for repositories, code, or topics. Great for finding open-source projects, implementations, and trending repos.",
                 parameters={
@@ -570,6 +604,34 @@ class ToolRegistry:
                 "domain": page.domain,
                 "word_count": page.word_count,
                 "url": url,
+            },
+        )
+
+    def _tool_search_reddit(self, args: dict) -> ToolResult:
+        """Handler for search_reddit tool — searches Reddit posts and discussions."""
+        from core.search.reddit import RedditSearcher
+        searcher = RedditSearcher(self.empire_id)
+
+        query = args.get("query", "")
+        subreddit = args.get("subreddit", "")
+        max_results = min(args.get("max_results", 5), 10)
+        sort = args.get("sort", "relevance")
+        time_filter = args.get("time_filter", "year")
+
+        result = searcher.search(
+            query, subreddit=subreddit, max_results=max_results,
+            sort=sort, time_filter=time_filter,
+        )
+
+        if not result.get("found"):
+            return ToolResult(tool_name="search_reddit", output=f"No Reddit results for: {query}")
+
+        return ToolResult(
+            tool_name="search_reddit",
+            output=result.get("summary", ""),
+            data={
+                "result_count": result.get("result_count", 0),
+                "stored_entities": result.get("stored_entities", 0),
             },
         )
 
