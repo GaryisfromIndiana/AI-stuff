@@ -13,10 +13,60 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
+from datetime import datetime, timezone
 from flask import Blueprint, render_template, jsonify, request, current_app
 
 logger = logging.getLogger(__name__)
 god_panel_bp = Blueprint("god_panel", __name__)
+
+# ── Command tracker — stores status/results for async commands ────────
+_command_store: dict[str, dict] = {}
+_command_lock = threading.Lock()
+_MAX_STORED_COMMANDS = 200
+
+
+def _track_command(command_id: str, command: str, action: str, topic: str) -> dict:
+    """Register a new command in the tracker."""
+    entry = {
+        "id": command_id,
+        "command": command,
+        "action": action,
+        "topic": topic,
+        "status": "accepted",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "result": None,
+        "error": None,
+        "cost": 0.0,
+    }
+    with _command_lock:
+        _command_store[command_id] = entry
+        # Evict oldest if over limit
+        if len(_command_store) > _MAX_STORED_COMMANDS:
+            oldest = sorted(_command_store.keys(), key=lambda k: _command_store[k]["started_at"])
+            for k in oldest[:len(_command_store) - _MAX_STORED_COMMANDS]:
+                del _command_store[k]
+    return entry
+
+
+def _complete_command(command_id: str, result: dict | None = None, error: str | None = None) -> None:
+    """Mark a command as completed."""
+    with _command_lock:
+        if command_id in _command_store:
+            entry = _command_store[command_id]
+            entry["status"] = "completed" if not error else "failed"
+            entry["completed_at"] = datetime.now(timezone.utc).isoformat()
+            entry["result"] = result
+            entry["error"] = error
+            entry["cost"] = (result or {}).get("research_cost", 0) or (result or {}).get("cost", 0)
+
+
+def _update_command_status(command_id: str, status: str) -> None:
+    """Update command status (e.g. 'running', 'researching')."""
+    with _command_lock:
+        if command_id in _command_store:
+            _command_store[command_id]["status"] = status
 
 
 @god_panel_bp.route("/")
@@ -266,136 +316,156 @@ def execute_command():
             "related_entities": len(related_entities),
         }
 
-        # ── Step 3: Execute ─────────────────────────────────────────────
-        if action == "RESEARCH":
-            research_result = _execute_deep_research(
-                empire_id, topic, description, assigned_lts,
-                prior_knowledge, build_on, priority,
-            )
-            result.update(research_result)
+        # ── Step 3: Execute (all heavy actions run async) ─────────────
+        command_id = str(uuid.uuid4())[:12]
+        _track_command(command_id, command, action, topic)
+        result["command_id"] = command_id
+        app = current_app._get_current_object()
 
-        elif action == "DIRECTIVE":
-            from core.directives.manager import DirectiveManager
-            dm = DirectiveManager(empire_id)
-            directive = dm.create_directive(
-                title=topic,
-                description=description,
-                priority=priority,
-                source="god_panel",
-            )
-            directive_id = directive.get("id", "")
-            if directive_id:
-                app = current_app._get_current_object()
-                def run_bg(app_ref=app, eid=empire_id, did=directive_id):
-                    with app_ref.app_context():
-                        try:
-                            dm2 = DirectiveManager(eid)
-                            dm2.execute_directive(did)
-                        except Exception as e:
-                            logger.error("Background directive %s failed: %s", did, e)
-                            try:
-                                dm3 = DirectiveManager(eid)
-                                dm3.cancel_directive(did)
-                            except Exception:
-                                pass
-                threading.Thread(target=run_bg, daemon=True).start()
-
-            result["status"] = "executing"
-            result["directive_id"] = directive_id
-            result["message"] = "Directive created and executing in background"
-
-        elif action == "WARROOM":
-            from core.directives.manager import DirectiveManager
-            dm = DirectiveManager(empire_id)
-            directive = dm.create_directive(
-                title=f"Debate: {topic}",
-                description=f"War Room debate: {description}. Each lieutenant argues from their domain perspective. Synthesize into a unified assessment.",
-                priority=priority,
-                source="god_panel",
-            )
-            directive_id = directive.get("id", "")
-            if directive_id:
-                app = current_app._get_current_object()
-                def run_bg(app_ref=app, eid=empire_id, did=directive_id):
-                    with app_ref.app_context():
-                        try:
-                            dm2 = DirectiveManager(eid)
-                            dm2.execute_directive(did)
-                        except Exception as e:
-                            logger.error("Background warroom %s failed: %s", did, e)
-                            try:
-                                dm3 = DirectiveManager(eid)
-                                dm3.cancel_directive(did)
-                            except Exception:
-                                pass
-                threading.Thread(target=run_bg, daemon=True).start()
-
-            result["status"] = "debating"
-            result["directive_id"] = directive_id
-
-        elif action == "SWEEP":
-            try:
-                from core.search.sweep import IntelligenceSweep
-                sweep = IntelligenceSweep(empire_id)
-                discoveries = sweep.run_sweep()
-                result["status"] = "completed"
-                result["discoveries"] = len(discoveries) if isinstance(discoveries, list) else 0
-            except Exception as e:
-                result["status"] = "error"
-                result["error"] = str(e)
-
-        elif action == "EVOLVE":
-            from core.evolution.cycle import EvolutionCycleManager
-            ecm = EvolutionCycleManager(empire_id)
-            evo_result = ecm.run_full_cycle()
-            result["status"] = "completed"
-            result["proposals"] = evo_result.proposals_collected
-            result["applied"] = evo_result.applied
-
-        elif action == "AUDIT":
-            from core.knowledge.maintenance import KnowledgeMaintainer
-            maintainer = KnowledgeMaintainer(empire_id)
-            audit = maintainer.deep_llm_audit(batch_size=20)
-            result["status"] = "completed"
-            result["audit"] = audit
-
-        elif action == "STATUS":
+        # STATUS is lightweight — run synchronously
+        if action == "STATUS":
             from core.scheduler.health import HealthChecker
             checker = HealthChecker(empire_id)
             result["status"] = "completed"
             result["health"] = checker.run_all_checks()
+            _complete_command(command_id, result)
+            result["cost"] = total_cost
+            return jsonify(result)
 
-        elif action == "CONTENT":
-            from core.content.generator import ContentGenerator
-            gen = ContentGenerator(empire_id)
-            report = gen.generate_topic_report(topic)
-            result["status"] = "completed"
-            result["report"] = report
+        # Everything else runs in a background thread
+        def _run_async(app_ref, cmd_id, act, eid, top, desc, lts, prior, build, pri):
+            with app_ref.app_context():
+                _update_command_status(cmd_id, "running")
+                try:
+                    res = _dispatch_action(act, eid, top, desc, lts, prior, build, pri)
+                    _complete_command(cmd_id, res)
+                except Exception as e:
+                    logger.error("Command %s (%s) failed: %s", cmd_id, act, e)
+                    _complete_command(cmd_id, error=str(e))
 
-        elif action == "PIPELINE":
-            from core.research.pipeline import ResearchPipeline
-            pipeline = ResearchPipeline(empire_id)
-            depth = "deep" if priority >= 7 else "standard"
-            pipe_result = pipeline.run(topic, depth=depth)
-            result["status"] = "completed"
-            result["pipeline"] = pipe_result.to_dict()
-            if pipe_result.synthesis:
-                result["synthesis"] = pipe_result.synthesis[:2000]
+        threading.Thread(
+            target=_run_async,
+            args=(app, command_id, action, empire_id, topic, description,
+                  assigned_lts, prior_knowledge, build_on, priority),
+            daemon=True,
+        ).start()
 
-        else:
-            # Unknown action — fall back to deep research
-            research_result = _execute_deep_research(
-                empire_id, topic, description, assigned_lts,
-                prior_knowledge, build_on, priority,
-            )
-            result.update(research_result)
-
-        result["cost"] = total_cost + result.get("research_cost", 0)
+        result["status"] = "accepted"
+        result["message"] = f"{action} running in background"
+        result["poll_url"] = f"/god/command/{command_id}/status"
+        result["cost"] = total_cost
         return jsonify(result)
 
     except Exception as e:
         logger.error("God Panel command failed: %s", e)
         return jsonify({"error": str(e), "command": command}), 500
+
+
+def _dispatch_action(
+    action: str, empire_id: str, topic: str, description: str,
+    lieutenant_domains: list[str], prior_knowledge: str,
+    build_on_existing: bool, priority: int,
+) -> dict:
+    """Dispatch an action to the appropriate handler. Runs in background thread."""
+    if action == "RESEARCH":
+        return _execute_deep_research(
+            empire_id, topic, description, lieutenant_domains,
+            prior_knowledge, build_on_existing, priority,
+        )
+
+    elif action == "DIRECTIVE":
+        from core.directives.manager import DirectiveManager
+        dm = DirectiveManager(empire_id)
+        directive = dm.create_directive(
+            title=topic, description=description,
+            priority=priority, source="god_panel",
+        )
+        directive_id = directive.get("id", "")
+        if directive_id:
+            dm2 = DirectiveManager(empire_id)
+            dm2.execute_directive(directive_id)
+        return {"status": "completed", "directive_id": directive_id}
+
+    elif action == "WARROOM":
+        from core.directives.manager import DirectiveManager
+        dm = DirectiveManager(empire_id)
+        directive = dm.create_directive(
+            title=f"Debate: {topic}",
+            description=f"War Room debate: {description}. Each lieutenant argues from their domain perspective.",
+            priority=priority, source="god_panel",
+        )
+        directive_id = directive.get("id", "")
+        if directive_id:
+            dm2 = DirectiveManager(empire_id)
+            dm2.execute_directive(directive_id)
+        return {"status": "completed", "directive_id": directive_id}
+
+    elif action == "SWEEP":
+        from core.search.sweep import IntelligenceSweep
+        sweep = IntelligenceSweep(empire_id)
+        discoveries = sweep.run_sweep()
+        return {"status": "completed", "discoveries": len(discoveries) if isinstance(discoveries, list) else 0}
+
+    elif action == "EVOLVE":
+        from core.evolution.cycle import EvolutionCycleManager
+        ecm = EvolutionCycleManager(empire_id)
+        evo_result = ecm.run_full_cycle()
+        return {"status": "completed", "proposals": evo_result.proposals_collected, "applied": evo_result.applied}
+
+    elif action == "AUDIT":
+        from core.knowledge.maintenance import KnowledgeMaintainer
+        maintainer = KnowledgeMaintainer(empire_id)
+        audit = maintainer.deep_llm_audit(batch_size=20)
+        return {"status": "completed", "audit": audit}
+
+    elif action == "CONTENT":
+        from core.content.generator import ContentGenerator
+        gen = ContentGenerator(empire_id)
+        report = gen.generate_topic_report(topic)
+        return {"status": "completed", "report": report}
+
+    elif action == "PIPELINE":
+        from core.research.pipeline import ResearchPipeline
+        pipeline = ResearchPipeline(empire_id)
+        depth = "deep" if priority >= 7 else "standard"
+        pipe_result = pipeline.run(topic, depth=depth)
+        result = {"status": "completed", "pipeline": pipe_result.to_dict()}
+        if pipe_result.synthesis:
+            result["synthesis"] = pipe_result.synthesis[:2000]
+        return result
+
+    else:
+        # Unknown action — fall back to research
+        return _execute_deep_research(
+            empire_id, topic, description, lieutenant_domains,
+            prior_knowledge, build_on_existing, priority,
+        )
+
+
+@god_panel_bp.route("/command/<command_id>/status")
+def command_status(command_id):
+    """Poll the status of an async God Panel command."""
+    with _command_lock:
+        entry = _command_store.get(command_id)
+    if not entry:
+        return jsonify({"error": "Command not found"}), 404
+    return jsonify(entry)
+
+
+@god_panel_bp.route("/commands")
+def list_commands():
+    """List all tracked God Panel commands (most recent first)."""
+    with _command_lock:
+        commands = sorted(
+            _command_store.values(),
+            key=lambda c: c["started_at"],
+            reverse=True,
+        )
+    limit = request.args.get("limit", 50, type=int)
+    status_filter = request.args.get("status")
+    if status_filter:
+        commands = [c for c in commands if c["status"] == status_filter]
+    return jsonify(commands[:limit])
 
 
 def _execute_deep_research(
