@@ -118,8 +118,13 @@ class ModelRouter:
             self._clients["anthropic"] = AnthropicClient(settings.anthropic_api_key)
 
         if settings.openai_api_key:
-            from llm.openai import OpenAIClient
-            self._clients["openai"] = OpenAIClient(settings.openai_api_key)
+            # Only register OpenAI if key looks valid (not a placeholder)
+            key = settings.openai_api_key.strip()
+            if key and not key.startswith("sk-placeholder") and len(key) > 20:
+                from llm.openai import OpenAIClient
+                self._clients["openai"] = OpenAIClient(key)
+            else:
+                logger.info("OpenAI key looks invalid — skipping OpenAI provider")
 
         # Initialize health for all models
         for key in MODEL_CATALOG:
@@ -181,7 +186,16 @@ class ModelRouter:
         scored.sort(key=lambda x: x[2], reverse=True)
 
         best_key, best_config, best_score = scored[0]
-        fallback_key = scored[1][0] if len(scored) > 1 else None
+
+        # Prefer fallback from the same provider (avoids cross-provider key issues)
+        fallback_key = None
+        for key, config, score in scored[1:]:
+            if config.provider == best_config.provider:
+                fallback_key = key
+                break
+        # If no same-provider fallback, use best alternative
+        if fallback_key is None and len(scored) > 1:
+            fallback_key = scored[1][0]
 
         estimated_cost = self._estimate_cost(best_config, metadata.estimated_tokens)
 
@@ -286,8 +300,8 @@ class ModelRouter:
             # Try fallback
             if decision.fallback_model:
                 fallback_config = MODEL_CATALOG[decision.fallback_model]
-                request.model = fallback_config.model_id
                 fallback_client = self.get_client(fallback_config.provider)
+                request.model = fallback_config.model_id
 
                 try:
                     response = fallback_client.complete(request)
@@ -296,8 +310,24 @@ class ModelRouter:
                     return response
                 except Exception as e2:
                     self._update_health(decision.fallback_model, success=False)
-                    logger.error("Fallback model %s also failed: %s", decision.fallback_model, e2)
-                    raise
+                    logger.warning("Fallback model %s also failed: %s", decision.fallback_model, e2)
+
+            # Last resort: try any available Anthropic model
+            for key, config in MODEL_CATALOG.items():
+                if config.provider != "anthropic" or key == decision.model_key:
+                    continue
+                if key == decision.fallback_model:
+                    continue
+                if config.provider not in self._clients:
+                    continue
+                try:
+                    request.model = config.model_id
+                    response = self._clients["anthropic"].complete(request)
+                    logger.info("Last-resort fallback to %s succeeded", key)
+                    self._record_cost(response, key, "anthropic")
+                    return response
+                except Exception:
+                    continue
 
             raise
 
