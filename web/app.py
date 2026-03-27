@@ -178,7 +178,7 @@ def create_app(config: dict | None = None) -> Flask:
         try:
             from core.scheduler.daemon import SchedulerDaemon
             empire_id = app.config.get("EMPIRE_ID", "")
-            daemon = SchedulerDaemon(empire_id, tick_interval=300)  # 5 min ticks
+            daemon = SchedulerDaemon(empire_id, tick_interval=100)  # 100s ticks
             app.config["_SCHEDULER_DAEMON"] = daemon
             daemon.start()
             logger.info("Scheduler daemon STARTED (5 min ticks, %d jobs)", len(daemon._jobs))
