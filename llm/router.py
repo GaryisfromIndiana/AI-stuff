@@ -85,6 +85,43 @@ TASK_CAPABILITY_MAP = {
     "classification": ["analysis"],
     "vision": ["vision"],
     "math": ["math", "reasoning"],
+    "synthesis": ["reasoning", "analysis"],
+    "planning": ["reasoning", "analysis"],
+    "debate": ["reasoning", "creative"],
+    "evolution": ["reasoning", "code"],
+    "audit": ["reasoning", "analysis"],
+}
+
+# ── Smart Model Tiering ──────────────────────────────────────────────────
+# Maps task types to their ideal model tier + preferred model.
+# This is the core routing intelligence:
+#   - Haiku 4.5: cheap tasks (classification, extraction, tagging, routing)
+#   - Sonnet 4:  agent work (research, ACE pipeline, lieutenant tasks)
+#   - Opus 4.6:  heavy infra (synthesis, evolution, audits, planning)
+
+TASK_MODEL_TIERS: dict[str, dict] = {
+    # ── Haiku tier (cheap, fast) ─────────────────────────────
+    "classification": {"model": "claude-haiku-4.5", "tier": 3, "reason": "fast classification"},
+    "extraction": {"model": "claude-haiku-4.5", "tier": 3, "reason": "entity/attribute extraction"},
+    "tagging": {"model": "claude-haiku-4.5", "tier": 3, "reason": "simple tagging"},
+    "routing": {"model": "claude-haiku-4.5", "tier": 3, "reason": "command routing"},
+    "summarization": {"model": "claude-haiku-4.5", "tier": 3, "reason": "quick summarization"},
+    "formatting": {"model": "claude-haiku-4.5", "tier": 3, "reason": "text formatting"},
+
+    # ── Sonnet tier (agent work) ─────────────────────────────
+    "research": {"model": "claude-sonnet-4", "tier": 2, "reason": "research analysis"},
+    "analysis": {"model": "claude-sonnet-4", "tier": 2, "reason": "moderate analysis"},
+    "code": {"model": "claude-sonnet-4", "tier": 2, "reason": "code generation"},
+    "general": {"model": "claude-sonnet-4", "tier": 2, "reason": "general agent work"},
+    "creative": {"model": "claude-sonnet-4", "tier": 2, "reason": "creative generation"},
+    "debate": {"model": "claude-sonnet-4", "tier": 2, "reason": "war room debate"},
+
+    # ── Opus tier (heavy infra) ──────────────────────────────
+    "synthesis": {"model": "claude-opus-4", "tier": 1, "reason": "deep synthesis"},
+    "evolution": {"model": "claude-opus-4", "tier": 1, "reason": "self-improvement proposals"},
+    "planning": {"model": "claude-opus-4", "tier": 1, "reason": "strategic planning"},
+    "audit": {"model": "claude-opus-4", "tier": 1, "reason": "deep knowledge audit"},
+    "expert": {"model": "claude-opus-4", "tier": 1, "reason": "expert-level reasoning"},
 }
 
 
@@ -168,6 +205,24 @@ class ModelRouter:
                 reasoning=f"User-preferred model: {metadata.preferred_model}",
                 fallback_model=self._find_fallback(metadata.preferred_model),
             )
+
+        # Smart tiering: check if task type has a pre-assigned model
+        tier_config = TASK_MODEL_TIERS.get(metadata.task_type)
+        if tier_config:
+            model_key = tier_config["model"]
+            if model_key in MODEL_CATALOG:
+                config = MODEL_CATALOG[model_key]
+                if config.provider in self._clients:
+                    health = self._health.get(model_key)
+                    if not health or health.consecutive_errors < 3:
+                        return RoutingDecision(
+                            model_key=model_key,
+                            model_config=config,
+                            provider=config.provider,
+                            estimated_cost_usd=self._estimate_cost(config, metadata.estimated_tokens),
+                            reasoning=f"Tiered routing: {tier_config['reason']} → {model_key}",
+                            fallback_model=self._find_fallback(model_key),
+                        )
 
         # Get candidates based on capabilities
         candidates = self._filter_candidates(metadata)
@@ -436,20 +491,45 @@ class ModelRouter:
         )
 
     def _find_fallback(self, model_key: str) -> str | None:
-        """Find a fallback model for a given model."""
+        """Find a fallback model — prefers same provider, then any available."""
         config = MODEL_CATALOG.get(model_key)
         if not config:
             return None
 
-        # Find another model at the same or lower tier
+        # Prefer same-provider fallback
+        same_provider = [
+            (k, c) for k, c in MODEL_CATALOG.items()
+            if k != model_key and c.provider == config.provider and c.provider in self._clients
+        ]
+        if same_provider:
+            # Pick closest tier (prefer stepping down, not up)
+            same_provider.sort(key=lambda x: abs(x[1].tier - config.tier))
+            return same_provider[0][0]
+
+        # Any provider fallback
         candidates = [
             (k, c) for k, c in MODEL_CATALOG.items()
-            if k != model_key and c.tier >= config.tier and c.provider in self._clients
+            if k != model_key and c.provider in self._clients
         ]
         if candidates:
             candidates.sort(key=lambda x: x[1].tier)
             return candidates[0][0]
         return None
+
+    def get_tier_map(self) -> dict:
+        """Return the current model tiering map for debugging/display."""
+        self._init_clients()
+        result = {}
+        for task_type, config in TASK_MODEL_TIERS.items():
+            model_key = config["model"]
+            available = model_key in MODEL_CATALOG and MODEL_CATALOG[model_key].provider in self._clients
+            result[task_type] = {
+                "model": model_key,
+                "tier": config["tier"],
+                "reason": config["reason"],
+                "available": available,
+            }
+        return result
 
     def _explain_decision(
         self,

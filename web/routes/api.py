@@ -1272,6 +1272,42 @@ def api_credibility_tiers():
     return jsonify(get_source_tiers())
 
 
+# ── Research Pipeline ────────────────────────────────────────────────
+
+@api_bp.route("/pipeline/run", methods=["POST"])
+@rate_limit(requests_per_minute=3)
+def api_pipeline_run():
+    """Run the full research pipeline on a topic."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json(silent=True) or {}
+    topic = data.get("topic", "").strip()
+    depth = data.get("depth", "standard")
+    max_sources = data.get("max_sources", 8)
+
+    if not topic:
+        return jsonify({"error": "topic is required"}), 400
+    if depth not in ("shallow", "standard", "deep"):
+        return jsonify({"error": "depth must be shallow, standard, or deep"}), 400
+
+    try:
+        from core.research.pipeline import ResearchPipeline
+        pipeline = ResearchPipeline(empire_id)
+        result = pipeline.run(topic, depth=depth, max_sources=max_sources)
+        return jsonify(result.to_dict())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Model Routing ────────────────────────────────────────────────────
+
+@api_bp.route("/routing/tiers")
+def api_routing_tiers():
+    """Show the current model tiering map."""
+    from llm.router import ModelRouter
+    router = ModelRouter()
+    return jsonify(router.get_tier_map())
+
+
 # ── Iterative Deepening ──────────────────────────────────────────────
 
 @api_bp.route("/deepening/candidates")

@@ -157,7 +157,8 @@ def execute_command():
             "- EVOLVE: Trigger an evolution cycle\n"
             "- AUDIT: Run a knowledge graph audit\n"
             "- STATUS: Report system status\n"
-            "- CONTENT: Generate a report on a topic\n\n"
+            "- CONTENT: Generate a report on a topic\n"
+            "- PIPELINE: Run full research pipeline (search→scrape→extract→synthesize)\n\n"
             f'User command: "{command}"\n\n'
             "Respond with EXACTLY this JSON format:\n"
             '{"action": "ACTION_TYPE", "topic": "the refined topic/title", '
@@ -287,6 +288,16 @@ def execute_command():
             report = gen.generate_topic_report(topic)
             result["status"] = "completed"
             result["report"] = report
+
+        elif action == "PIPELINE":
+            from core.research.pipeline import ResearchPipeline
+            pipeline = ResearchPipeline(empire_id)
+            depth = "deep" if priority >= 7 else "standard"
+            pipe_result = pipeline.run(topic, depth=depth)
+            result["status"] = "completed"
+            result["pipeline"] = pipe_result.to_dict()
+            if pipe_result.synthesis:
+                result["synthesis"] = pipe_result.synthesis[:2000]
 
         else:
             # Default to research
