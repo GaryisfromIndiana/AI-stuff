@@ -128,29 +128,41 @@ class KnowledgeQuerier:
 
             entity_db = repo.get_by_name(primary.name, self.empire_id)
             if entity_db:
-                for rel in repo.get_relations(entity_db.id, direction="outgoing"):
-                    target = repo.get(rel.target_entity_id)
-                    meta = rel.metadata_json or {}
-                    relations.append({
-                        "type": rel.relation_type,
-                        "label": meta.get("forward_label", rel.relation_type),
-                        "target": target.name if target else rel.target_entity_id,
-                        "target_type": target.entity_type if target else "",
-                        "confidence": rel.confidence,
-                        "weight": rel.weight,
-                    })
+                # Batch fetch all related entity IDs first to avoid N+1 queries
+                all_relations = repo.get_relations(entity_db.id, direction="both")
+                target_ids = [rel.target_entity_id for rel in all_relations if rel.source_entity_id == entity_db.id]
+                source_ids = [rel.source_entity_id for rel in all_relations if rel.target_entity_id == entity_db.id]
+                all_entity_ids = list(set(target_ids + source_ids))
+                
+                # Single batch query for all related entities
+                related_entities = repo.get_many(all_entity_ids)
+                entities_by_id = {e.id: e for e in related_entities}
 
-                for rel in repo.get_relations(entity_db.id, direction="incoming"):
-                    source = repo.get(rel.source_entity_id)
+                for rel in all_relations:
                     meta = rel.metadata_json or {}
-                    relations.append({
-                        "type": meta.get("inverse_label", rel.relation_type),
-                        "label": meta.get("inverse_label", rel.relation_type),
-                        "target": source.name if source else rel.source_entity_id,
-                        "target_type": source.entity_type if source else "",
-                        "confidence": rel.confidence,
-                        "weight": rel.weight,
-                    })
+                    
+                    if rel.source_entity_id == entity_db.id:
+                        # Outgoing relation
+                        target = entities_by_id.get(rel.target_entity_id)
+                        relations.append({
+                            "type": rel.relation_type,
+                            "label": meta.get("forward_label", rel.relation_type),
+                            "target": target.name if target else rel.target_entity_id,
+                            "target_type": target.entity_type if target else "",
+                            "confidence": rel.confidence,
+                            "weight": rel.weight,
+                        })
+                    else:
+                        # Incoming relation
+                        source = entities_by_id.get(rel.source_entity_id)
+                        relations.append({
+                            "type": meta.get("inverse_label", rel.relation_type),
+                            "label": meta.get("inverse_label", rel.relation_type),
+                            "target": source.name if source else rel.source_entity_id,
+                            "target_type": source.entity_type if source else "",
+                            "confidence": rel.confidence,
+                            "weight": rel.weight,
+                        })
         except Exception as e:
             logger.debug("Relation lookup failed: %s", e)
 

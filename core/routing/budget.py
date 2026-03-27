@@ -207,9 +207,12 @@ class BudgetManager:
             from db.engine import get_session
             from db.repositories.task import TaskRepository
             session = get_session()
-            repo = TaskRepository(session)
-            stats = repo.get_cost_aggregation(days=days)
-            return {k: v.get("total_cost", 0) for k, v in stats.get("by_model", {}).items()}
+            try:
+                repo = TaskRepository(session)
+                stats = repo.get_cost_aggregation(days=days)
+                return {k: v.get("total_cost", 0) for k, v in stats.get("by_model", {}).items()}
+            finally:
+                session.close()
         except Exception:
             return {}
 

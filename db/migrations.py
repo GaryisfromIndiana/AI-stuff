@@ -100,6 +100,9 @@ class MigrationRunner:
                 CREATE INDEX IF NOT EXISTS ix_budget_logs_cost ON budget_logs(cost_usd);
                 CREATE INDEX IF NOT EXISTS ix_memory_created ON memory_entries(created_at);
                 CREATE INDEX IF NOT EXISTS ix_knowledge_created ON knowledge_entities(created_at);
+                CREATE INDEX IF NOT EXISTS ix_memory_last_accessed ON memory_entries(last_accessed_at);
+                CREATE INDEX IF NOT EXISTS ix_memory_access_count ON memory_entries(access_count);
+                CREATE INDEX IF NOT EXISTS ix_knowledge_access_count ON knowledge_entities(access_count);
             """,
             sql_down="""
                 DROP INDEX IF EXISTS ix_tasks_cost;
@@ -107,6 +110,9 @@ class MigrationRunner:
                 DROP INDEX IF EXISTS ix_budget_logs_cost;
                 DROP INDEX IF EXISTS ix_memory_created;
                 DROP INDEX IF EXISTS ix_knowledge_created;
+                DROP INDEX IF EXISTS ix_memory_last_accessed;
+                DROP INDEX IF EXISTS ix_memory_access_count;
+                DROP INDEX IF EXISTS ix_knowledge_access_count;
             """,
         ))
 

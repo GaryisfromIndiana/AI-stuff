@@ -261,8 +261,8 @@ class ResearchPipeline:
                     max_entities=15,
                 )
 
+                # Add entities and relations without calling get_stats() in loop
                 if extraction.entities:
-                    before = graph.get_stats().entity_count
                     for entity in extraction.entities:
                         graph.add_entity(
                             name=entity.get("name", ""),
@@ -272,10 +272,9 @@ class ResearchPipeline:
                             tags=["pipeline", topic.replace(" ", "_")[:30]],
                             attributes={"pipeline_topic": topic},
                         )
-                    total_entities += max(0, graph.get_stats().entity_count - before)
+                    total_entities += len(extraction.entities)
 
                 if extraction.relations:
-                    before_r = graph.get_stats().relation_count
                     for rel in extraction.relations:
                         graph.add_relation(
                             source_name=rel.get("source", ""),
@@ -283,7 +282,7 @@ class ResearchPipeline:
                             relation_type=rel.get("type", "related_to"),
                             confidence=rel.get("confidence", 0.6),
                         )
-                    total_relations += max(0, graph.get_stats().relation_count - before_r)
+                    total_relations += len(extraction.relations)
 
             # Store research memory
             mm.store(

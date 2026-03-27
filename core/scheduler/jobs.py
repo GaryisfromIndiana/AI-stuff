@@ -491,6 +491,35 @@ class ShallowEnrichmentJob(BaseJob):
         )
 
 
+class CrossLieutenantSynthesisJob(BaseJob):
+    """Find cross-domain knowledge overlaps and generate unified insights."""
+
+    name = "cross_synthesis"
+    description = "Synthesize overlapping knowledge across lieutenant domains"
+    interval_seconds = 8 * 3600  # 8 hours
+    priority = 5
+
+    def execute(self) -> JobResult:
+        start = time.time()
+        try:
+            from core.research.cross_synthesis import CrossLieutenantSynthesizer
+            synthesizer = CrossLieutenantSynthesizer(self.empire_id)
+            result = synthesizer.run_synthesis_cycle(max_syntheses=3)
+            return JobResult(
+                success=True,
+                data={
+                    "overlaps": result.overlaps_detected,
+                    "syntheses": result.syntheses_produced,
+                    "insights": result.total_insights,
+                    "cost_usd": result.total_cost_usd,
+                },
+                duration_seconds=time.time() - start,
+                items_processed=result.syntheses_produced,
+            )
+        except Exception as e:
+            return JobResult(success=False, error=str(e), duration_seconds=time.time() - start)
+
+
 # Job registry
 JOB_REGISTRY: dict[str, type[BaseJob]] = {
     "learning_cycle": LearningCycleJob,
@@ -509,6 +538,7 @@ JOB_REGISTRY: dict[str, type[BaseJob]] = {
     "duplicate_resolution": DuplicateResolutionJob,
     "iterative_deepening": IterativeDeepeningJob,
     "shallow_enrichment": ShallowEnrichmentJob,
+    "cross_synthesis": CrossLieutenantSynthesisJob,
 }
 
 

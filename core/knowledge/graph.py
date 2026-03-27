@@ -497,7 +497,18 @@ class KnowledgeGraph:
         """
         repo = self._get_repo()
         try:
-            entities = repo.get_by_empire(self.empire_id, limit=10000)
+            from sqlalchemy import select
+            from sqlalchemy.orm import joinedload
+            from db.models import KnowledgeEntity
+
+            # Eager load outgoing_relations to avoid N+1 queries
+            stmt = (
+                select(KnowledgeEntity)
+                .where(KnowledgeEntity.empire_id == self.empire_id)
+                .options(joinedload(KnowledgeEntity.outgoing_relations))
+                .limit(10000)
+            )
+            entities = list(repo.session.execute(stmt).scalars().unique().all())
 
             if not entities:
                 return {}
@@ -544,8 +555,28 @@ class KnowledgeGraph:
 
         repo = self._get_repo()
         try:
-            entities = [repo.get_by_name(name, self.empire_id) for name in entity_names]
-            entities = [e for e in entities if e is not None]
+            from sqlalchemy import select
+            from sqlalchemy.orm import joinedload
+            from db.models import KnowledgeEntity
+
+            # Fetch all entities with eager-loaded relations to avoid N+1
+            entities = []
+            for name in entity_names:
+                stmt = (
+                    select(KnowledgeEntity)
+                    .where(and_(
+                        KnowledgeEntity.name == name,
+                        KnowledgeEntity.empire_id == self.empire_id,
+                    ))
+                    .options(
+                        joinedload(KnowledgeEntity.outgoing_relations),
+                        joinedload(KnowledgeEntity.incoming_relations),
+                    )
+                    .limit(1)
+                )
+                entity = repo.session.execute(stmt).scalar_one_or_none()
+                if entity:
+                    entities.append(entity)
 
             if len(entities) < 2:
                 return None
@@ -563,7 +594,7 @@ class KnowledgeGraph:
 
             repo.update(primary.id, attributes_json=merged_attrs)
 
-            # Transfer relations from others to primary
+            # Transfer relations from others to primary (relations are already loaded)
             for other in others:
                 for rel in (other.outgoing_relations or []):
                     if rel.target_entity_id != primary.id:
@@ -622,7 +653,18 @@ class KnowledgeGraph:
         """Export the graph for sharing or visualization."""
         repo = self._get_repo()
         try:
-            entities = repo.get_by_empire(self.empire_id, limit=10000)
+            from sqlalchemy import select
+            from sqlalchemy.orm import joinedload
+            from db.models import KnowledgeEntity, KnowledgeRelation
+
+            # Eager load outgoing_relations to avoid N+1 queries
+            stmt = (
+                select(KnowledgeEntity)
+                .where(KnowledgeEntity.empire_id == self.empire_id)
+                .options(joinedload(KnowledgeEntity.outgoing_relations))
+                .limit(10000)
+            )
+            entities = list(repo.session.execute(stmt).scalars().unique().all())
 
             nodes = []
             edges = []

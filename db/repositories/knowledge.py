@@ -171,14 +171,21 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
         Returns:
             Number of entities removed.
         """
+        from sqlalchemy.orm import joinedload
+
+        # Eager load relations to avoid N+1 queries
         stmt = (
             select(KnowledgeEntity)
             .where(and_(
                 KnowledgeEntity.empire_id == empire_id,
                 KnowledgeEntity.confidence < min_confidence,
             ))
+            .options(
+                joinedload(KnowledgeEntity.outgoing_relations),
+                joinedload(KnowledgeEntity.incoming_relations),
+            )
         )
-        entities = list(self.session.execute(stmt).scalars().all())
+        entities = list(self.session.execute(stmt).scalars().unique().all())
 
         removed = 0
         for entity in entities:
@@ -266,6 +273,7 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
 
         for depth in range(1, max_depth + 1):
             next_ids = []
+            neighbor_ids_to_fetch = []
 
             for eid in current_ids:
                 relations = self.get_relations(eid, direction="both", relation_type=None)
@@ -283,13 +291,22 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
                     if neighbor_id not in visited:
                         visited.add(neighbor_id)
                         next_ids.append(neighbor_id)
-                        neighbor = self.get(neighbor_id)
-                        if neighbor:
-                            results.append({
-                                "entity": neighbor,
-                                "relation": rel,
-                                "depth": depth,
-                            })
+                        neighbor_ids_to_fetch.append((neighbor_id, rel, depth))
+
+            # Batch fetch all neighbors at this depth to avoid N+1 queries
+            if neighbor_ids_to_fetch:
+                neighbor_ids = [nid for nid, _, _ in neighbor_ids_to_fetch]
+                neighbors = self.get_many(neighbor_ids)
+                neighbors_by_id = {n.id: n for n in neighbors}
+
+                for neighbor_id, rel, depth_val in neighbor_ids_to_fetch:
+                    neighbor = neighbors_by_id.get(neighbor_id)
+                    if neighbor:
+                        results.append({
+                            "entity": neighbor,
+                            "relation": rel,
+                            "depth": depth_val,
+                        })
 
             current_ids = next_ids
             if not current_ids:

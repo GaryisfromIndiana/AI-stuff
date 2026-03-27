@@ -68,6 +68,13 @@ class DirectiveManager:
         from db.repositories.directive import DirectiveRepository
         return DirectiveRepository(get_session())
 
+    def _close_repo(self, repo) -> None:
+        """Close the session owned by a repository."""
+        try:
+            repo.session.close()
+        except Exception:
+            pass
+
     def create_directive(
         self,
         title: str,
@@ -89,33 +96,39 @@ class DirectiveManager:
             Created directive info.
         """
         repo = self._get_repo()
-        directive = repo.create(
-            empire_id=self.empire_id,
-            title=title,
-            description=description,
-            priority=priority,
-            source=source,
-            assigned_lieutenants_json=lieutenant_ids or [],
-        )
-        repo.commit()
+        try:
+            directive = repo.create(
+                empire_id=self.empire_id,
+                title=title,
+                description=description,
+                priority=priority,
+                source=source,
+                assigned_lieutenants_json=lieutenant_ids or [],
+            )
+            repo.commit()
 
-        logger.info("Created directive: %s (priority=%d, source=%s)", title, priority, source)
-        return {
-            "id": directive.id,
-            "title": title,
-            "status": "pending",
-            "priority": priority,
-        }
+            logger.info("Created directive: %s (priority=%d, source=%s)", title, priority, source)
+            return {
+                "id": directive.id,
+                "title": title,
+                "status": "pending",
+                "priority": priority,
+            }
+        finally:
+            self._close_repo(repo)
 
     def start_directive(self, directive_id: str) -> dict:
         """Start executing a directive."""
         repo = self._get_repo()
-        directive = repo.start_directive(directive_id)
-        repo.commit()
+        try:
+            directive = repo.start_directive(directive_id)
+            repo.commit()
 
-        if directive:
-            return {"id": directive_id, "status": "planning", "started": True}
-        return {"id": directive_id, "started": False, "error": "Directive not found"}
+            if directive:
+                return {"id": directive_id, "status": "planning", "started": True}
+            return {"id": directive_id, "started": False, "error": "Directive not found"}
+        finally:
+            self._close_repo(repo)
 
     def execute_directive(self, directive_id: str) -> dict:
         """Execute a directive through the full pipeline.
@@ -133,13 +146,16 @@ class DirectiveManager:
             Execution results.
         """
         repo = self._get_repo()
-        db_directive = repo.get(directive_id)
-        if not db_directive:
-            return {"error": "Directive not found"}
+        try:
+            db_directive = repo.get(directive_id)
+            if not db_directive:
+                return {"error": "Directive not found"}
 
-        start_time = time.time()
-        repo.start_directive(directive_id)
-        repo.commit()
+            start_time = time.time()
+            repo.start_directive(directive_id)
+            repo.commit()
+        finally:
+            self._close_repo(repo)
 
         logger.info("Executing directive: %s", db_directive.title)
 
@@ -168,8 +184,12 @@ class DirectiveManager:
         plan_result = session.run_planning_phase(db_directive.title, db_directive.description)
 
         # 2. Wave execution
-        repo.update(directive_id, status="executing", pipeline_stage="executing")
-        repo.commit()
+        repo = self._get_repo()
+        try:
+            repo.update(directive_id, status="executing", pipeline_stage="executing")
+            repo.commit()
+        finally:
+            self._close_repo(repo)
 
         unified_plan = plan_result.get("unified_plan", {})
 
@@ -182,40 +202,10 @@ class DirectiveManager:
             except Exception:
                 waves = []
 
-        # If no waves from planning, build default waves from the directive
+        # If no waves from planning, use LLM to generate proper task breakdown
         if not waves:
-            logger.warning("No waves from War Room — building default task set")
-            import re
-            description = db_directive.description
-
-            # Try splitting on numbered items: (1)...(2)... or 1)...2)...
-            numbered = re.split(r'\(\d+\)\s*', description)
-            if len(numbered) <= 2:
-                # Try splitting on sentences
-                numbered = [s.strip() for s in description.split(".") if len(s.strip()) > 20]
-
-            default_tasks = []
-            for part in numbered:
-                part = part.strip().strip(",").strip()
-                if len(part) > 15:
-                    default_tasks.append({
-                        "title": part[:100],
-                        "description": f"Research and produce detailed analysis on: {part}",
-                    })
-
-            if not default_tasks:
-                default_tasks = [{"title": db_directive.title, "description": db_directive.description}]
-
-            # Split into 2 waves (first wave slightly larger)
-            mid = max(1, (len(default_tasks) + 1) // 2)
-            waves = [
-                {"wave_number": 1, "tasks": default_tasks[:mid]},
-                {"wave_number": 2, "tasks": default_tasks[mid:]},
-            ]
-            # Remove empty waves
-            waves = [w for w in waves if w.get("tasks")]
-
-            logger.info("Built %d waves with %d tasks from directive", len(waves), len(default_tasks))
+            logger.warning("No waves from War Room — using LLM to generate task breakdown")
+            waves = self._llm_task_breakdown(db_directive.title, db_directive.description)
 
         wave_results = []
         total_cost = 0.0
@@ -223,8 +213,12 @@ class DirectiveManager:
         for wave in waves:
             wave_num = wave.get("wave_number", 1)
             tasks = wave.get("tasks", [])
-            repo.update(directive_id, current_wave=wave_num)
-            repo.commit()
+            repo = self._get_repo()
+            try:
+                repo.update(directive_id, current_wave=wave_num)
+                repo.commit()
+            finally:
+                self._close_repo(repo)
 
             wave_task_results = []
             task_records = []
@@ -334,14 +328,17 @@ class DirectiveManager:
 
         # 4. Complete
         repo = self._get_repo()
-        repo.update(
-            directive_id,
-            status="completed",
-            pipeline_stage="delivered",
-            completed_at=datetime.now(timezone.utc),
-            total_cost_usd=total_cost,
-        )
-        repo.commit()
+        try:
+            repo.update(
+                directive_id,
+                status="completed",
+                pipeline_stage="delivered",
+                completed_at=datetime.now(timezone.utc),
+                total_cost_usd=total_cost,
+            )
+            repo.commit()
+        finally:
+            self._close_repo(repo)
 
         duration = time.time() - start_time
         logger.info("Directive completed: %s (cost=$%.4f, duration=%.1fs)", db_directive.title, total_cost, duration)
@@ -358,61 +355,123 @@ class DirectiveManager:
     def get_directive(self, directive_id: str) -> dict | None:
         """Get directive details."""
         repo = self._get_repo()
-        d = repo.get(directive_id)
-        if not d:
-            return None
-        return {
-            "id": d.id, "title": d.title, "description": d.description,
-            "status": d.status, "priority": d.priority, "source": d.source,
-            "current_wave": d.current_wave, "total_cost": d.total_cost_usd,
-            "created_at": d.created_at.isoformat() if d.created_at else None,
-        }
+        try:
+            d = repo.get(directive_id)
+            if not d:
+                return None
+            return {
+                "id": d.id, "title": d.title, "description": d.description,
+                "status": d.status, "priority": d.priority, "source": d.source,
+                "current_wave": d.current_wave, "total_cost": d.total_cost_usd,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            }
+        finally:
+            self._close_repo(repo)
 
     def list_directives(self, status: str | None = None, limit: int = 50) -> list[dict]:
         """List directives with optional status filter."""
         repo = self._get_repo()
-        directives = repo.get_by_empire(self.empire_id, status=status, limit=limit)
-        return [
-            {
-                "id": d.id, "title": d.title, "status": d.status,
-                "priority": d.priority, "source": d.source,
-                "total_cost": d.total_cost_usd,
-                "created_at": d.created_at.isoformat() if d.created_at else None,
-            }
-            for d in directives
-        ]
+        try:
+            directives = repo.get_by_empire(self.empire_id, status=status, limit=limit)
+            return [
+                {
+                    "id": d.id, "title": d.title, "status": d.status,
+                    "priority": d.priority, "source": d.source,
+                    "total_cost": d.total_cost_usd,
+                    "created_at": d.created_at.isoformat() if d.created_at else None,
+                }
+                for d in directives
+            ]
+        finally:
+            self._close_repo(repo)
 
     def get_progress(self, directive_id: str) -> DirectiveProgress:
         """Get directive execution progress."""
         repo = self._get_repo()
-        progress = repo.get_progress(directive_id)
-        return DirectiveProgress(
-            directive_id=directive_id,
-            total_tasks=progress.get("total_tasks", 0),
-            completed=progress.get("completed", 0),
-            failed=progress.get("failed", 0),
-            in_progress=progress.get("in_progress", 0),
-            pending=progress.get("pending", 0),
-            completion_percent=progress.get("completion_percent", 0),
-        )
+        try:
+            progress = repo.get_progress(directive_id)
+            return DirectiveProgress(
+                directive_id=directive_id,
+                total_tasks=progress.get("total_tasks", 0),
+                completed=progress.get("completed", 0),
+                failed=progress.get("failed", 0),
+                in_progress=progress.get("in_progress", 0),
+                pending=progress.get("pending", 0),
+                completion_percent=progress.get("completion_percent", 0),
+            )
+        finally:
+            self._close_repo(repo)
 
     def get_cost_summary(self, directive_id: str) -> CostSummary:
         """Get cost summary for a directive."""
         repo = self._get_repo()
-        raw = repo.get_cost_summary(directive_id)
-        return CostSummary(
-            total_cost=raw.get("total_cost_usd", 0),
-            by_model=raw.get("by_model", {}),
-        )
+        try:
+            raw = repo.get_cost_summary(directive_id)
+            return CostSummary(
+                total_cost=raw.get("total_cost_usd", 0),
+                by_model=raw.get("by_model", {}),
+            )
+        finally:
+            self._close_repo(repo)
 
     def cancel_directive(self, directive_id: str) -> bool:
         """Cancel a directive."""
         repo = self._get_repo()
-        result = repo.update(directive_id, status="cancelled", completed_at=datetime.now(timezone.utc))
-        repo.commit()
-        return result is not None
+        try:
+            result = repo.update(directive_id, status="cancelled", completed_at=datetime.now(timezone.utc))
+            repo.commit()
+            return result is not None
+        finally:
+            self._close_repo(repo)
 
     def get_stats(self, days: int = 30) -> dict:
         """Get directive statistics."""
         repo = self._get_repo()
-        return repo.get_stats(self.empire_id, days)
+        try:
+            return repo.get_stats(self.empire_id, days)
+        finally:
+            self._close_repo(repo)
+
+    def _llm_task_breakdown(self, title: str, description: str) -> list[dict]:
+        """Use LLM to generate a proper task breakdown when War Room produces no waves."""
+        try:
+            import json
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+
+            router = ModelRouter(self.empire_id)
+
+            prompt = (
+                "Break down this directive into concrete research tasks organized in waves.\n"
+                "Wave 1 should be foundational research. Wave 2 should build on Wave 1 findings.\n\n"
+                f"Directive: {title}\n"
+                f"Description: {description[:2000]}\n\n"
+                "Respond with ONLY a JSON array of waves:\n"
+                '[{"wave_number": 1, "tasks": [{"title": "...", "description": "..."}]}, '
+                '{"wave_number": 2, "tasks": [{"title": "...", "description": "..."}]}]\n\n'
+                "Generate 2-4 tasks per wave. Be specific and actionable."
+            )
+
+            response = router.execute(
+                LLMRequest(
+                    messages=[LLMMessage.user(prompt)],
+                    max_tokens=600,
+                    temperature=0.3,
+                ),
+                TaskMetadata(task_type="planning", complexity="moderate"),
+            )
+
+            text = response.content.strip()
+            start = text.find("[")
+            end = text.rfind("]") + 1
+            if start >= 0 and end > start:
+                waves = json.loads(text[start:end])
+                if isinstance(waves, list) and waves:
+                    logger.info("LLM generated %d waves for directive fallback", len(waves))
+                    return waves
+
+        except Exception as e:
+            logger.warning("LLM task breakdown failed: %s", e)
+
+        # Ultimate fallback: single task
+        return [{"wave_number": 1, "tasks": [{"title": title, "description": description}]}]

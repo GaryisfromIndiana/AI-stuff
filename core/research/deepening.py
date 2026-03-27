@@ -239,7 +239,6 @@ class IterativeDeepener:
                 )
 
                 if extraction.entities:
-                    before_count = graph.get_stats().entity_count
                     for entity in extraction.entities:
                         graph.add_entity(
                             name=entity.get("name", ""),
@@ -249,11 +248,9 @@ class IterativeDeepener:
                             tags=["deepening", "depth_1"],
                             attributes={"deepening_depth": 1, "deepening_topic": candidate.topic},
                         )
-                    after_count = graph.get_stats().entity_count
-                    result.new_entities += max(0, after_count - before_count)
+                    result.new_entities += len(extraction.entities)
 
                 if extraction.relations:
-                    before_rels = graph.get_stats().relation_count
                     for rel in extraction.relations:
                         graph.add_relation(
                             source_name=rel.get("source", ""),
@@ -261,8 +258,7 @@ class IterativeDeepener:
                             relation_type=rel.get("type", "related_to"),
                             confidence=rel.get("confidence", 0.6),
                         )
-                    after_rels = graph.get_stats().relation_count
-                    result.new_relations += max(0, after_rels - before_rels)
+                    result.new_relations += len(extraction.relations)
 
             except Exception as e:
                 logger.warning("Medium deepening query failed for '%s': %s", query, e)
@@ -308,7 +304,6 @@ class IterativeDeepener:
                     )
 
                     if extraction.entities:
-                        before = graph.get_stats().entity_count
                         for entity in extraction.entities:
                             graph.add_entity(
                                 name=entity.get("name", ""),
@@ -318,10 +313,9 @@ class IterativeDeepener:
                                 tags=["deepening", "depth_2"],
                                 attributes={"deepening_depth": 2, "deepening_topic": candidate.topic},
                             )
-                        result.new_entities += max(0, graph.get_stats().entity_count - before)
+                        result.new_entities += len(extraction.entities)
 
                     if extraction.relations:
-                        before_r = graph.get_stats().relation_count
                         for rel in extraction.relations:
                             graph.add_relation(
                                 source_name=rel.get("source", ""),
@@ -329,7 +323,7 @@ class IterativeDeepener:
                                 relation_type=rel.get("type", "related_to"),
                                 confidence=rel.get("confidence", 0.65),
                             )
-                        result.new_relations += max(0, graph.get_stats().relation_count - before_r)
+                        result.new_relations += len(extraction.relations)
 
             except Exception as e:
                 logger.warning("Deep query failed for '%s': %s", query, e)

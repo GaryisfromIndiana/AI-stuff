@@ -55,6 +55,13 @@ class LieutenantManager:
         from db.repositories.lieutenant import LieutenantRepository
         return LieutenantRepository(get_session())
 
+    def _close_repo(self, repo) -> None:
+        """Close the session owned by a repository."""
+        try:
+            repo.session.close()
+        except Exception:
+            pass
+
     def create_lieutenant(
         self,
         name: str,
@@ -82,16 +89,19 @@ class LieutenantManager:
                 persona = PersonaConfig(name=name, role="AI Assistant", domain=domain or "general")
 
         repo = self._get_repo()
-        db_lt = repo.create(
-            empire_id=self.empire_id,
-            name=name,
-            domain=domain or persona.domain,
-            persona_json=persona.to_dict(),
-            specializations_json=persona.expertise_areas,
-            preferred_models_json=persona.preferred_models,
-            status="active",
-        )
-        repo.commit()
+        try:
+            db_lt = repo.create(
+                empire_id=self.empire_id,
+                name=name,
+                domain=domain or persona.domain,
+                persona_json=persona.to_dict(),
+                specializations_json=persona.expertise_areas,
+                preferred_models_json=persona.preferred_models,
+                status="active",
+            )
+            repo.commit()
+        finally:
+            self._close_repo(repo)
 
         lt = Lieutenant(
             lieutenant_id=db_lt.id,
@@ -112,21 +122,24 @@ class LieutenantManager:
             return self._lieutenants[lieutenant_id]
 
         repo = self._get_repo()
-        db_lt = repo.get(lieutenant_id)
-        if db_lt is None:
-            return None
+        try:
+            db_lt = repo.get(lieutenant_id)
+            if db_lt is None:
+                return None
 
-        persona = PersonaConfig.from_dict(db_lt.persona_json or {})
-        lt = Lieutenant(
-            lieutenant_id=db_lt.id,
-            name=db_lt.name,
-            empire_id=self.empire_id,
-            persona=persona,
-            domain=db_lt.domain,
-            ace_engine=self.ace,
-        )
-        self._lieutenants[lieutenant_id] = lt
-        return lt
+            persona = PersonaConfig.from_dict(db_lt.persona_json or {})
+            lt = Lieutenant(
+                lieutenant_id=db_lt.id,
+                name=db_lt.name,
+                empire_id=self.empire_id,
+                persona=persona,
+                domain=db_lt.domain,
+                ace_engine=self.ace,
+            )
+            self._lieutenants[lieutenant_id] = lt
+            return lt
+        finally:
+            self._close_repo(repo)
 
     def list_lieutenants(
         self,
@@ -145,22 +158,25 @@ class LieutenantManager:
             return self._lt_list_cache
 
         repo = self._get_repo()
-        db_lts = repo.get_by_empire(self.empire_id, status=status, domain=domain)
+        try:
+            db_lts = repo.get_by_empire(self.empire_id, status=status, domain=domain)
 
-        result = [
-            {
-                "id": lt.id,
-                "name": lt.name,
-                "domain": lt.domain,
-                "status": lt.status,
-                "performance_score": lt.performance_score,
-                "tasks_completed": lt.tasks_completed,
-                "tasks_failed": lt.tasks_failed,
-                "total_cost": lt.total_cost_usd,
-                "last_active": lt.last_active_at.isoformat() if lt.last_active_at else None,
-            }
-            for lt in db_lts
-        ]
+            result = [
+                {
+                    "id": lt.id,
+                    "name": lt.name,
+                    "domain": lt.domain,
+                    "status": lt.status,
+                    "performance_score": lt.performance_score,
+                    "tasks_completed": lt.tasks_completed,
+                    "tasks_failed": lt.tasks_failed,
+                    "total_cost": lt.total_cost_usd,
+                    "last_active": lt.last_active_at.isoformat() if lt.last_active_at else None,
+                }
+                for lt in db_lts
+            ]
+        finally:
+            self._close_repo(repo)
 
         # Cache unfiltered results
         if not status and not domain:
@@ -177,30 +193,39 @@ class LieutenantManager:
     def activate_lieutenant(self, lieutenant_id: str) -> bool:
         """Activate an inactive lieutenant."""
         repo = self._get_repo()
-        result = repo.update(lieutenant_id, status="active")
-        if result:
-            repo.commit()
-        return result is not None
+        try:
+            result = repo.update(lieutenant_id, status="active")
+            if result:
+                repo.commit()
+            return result is not None
+        finally:
+            self._close_repo(repo)
 
     def deactivate_lieutenant(self, lieutenant_id: str) -> bool:
         """Deactivate a lieutenant."""
         repo = self._get_repo()
-        result = repo.update(lieutenant_id, status="inactive")
-        if result:
-            repo.commit()
-        if lieutenant_id in self._lieutenants:
-            del self._lieutenants[lieutenant_id]
-        return result is not None
+        try:
+            result = repo.update(lieutenant_id, status="inactive")
+            if result:
+                repo.commit()
+            if lieutenant_id in self._lieutenants:
+                del self._lieutenants[lieutenant_id]
+            return result is not None
+        finally:
+            self._close_repo(repo)
 
     def delete_lieutenant(self, lieutenant_id: str) -> bool:
         """Delete a lieutenant permanently."""
         repo = self._get_repo()
-        result = repo.delete(lieutenant_id)
-        if result:
-            repo.commit()
-        if lieutenant_id in self._lieutenants:
-            del self._lieutenants[lieutenant_id]
-        return result
+        try:
+            result = repo.delete(lieutenant_id)
+            if result:
+                repo.commit()
+            if lieutenant_id in self._lieutenants:
+                del self._lieutenants[lieutenant_id]
+            return result
+        finally:
+            self._close_repo(repo)
 
     def find_best_lieutenant(self, task_description: str, task_type: str = "") -> Lieutenant | None:
         """Find the best lieutenant for a task with load balancing.
@@ -210,65 +235,68 @@ class LieutenantManager:
         distribute work evenly across the fleet.
         """
         repo = self._get_repo()
-        active_lts = repo.get_by_empire(self.empire_id, status="active")
+        try:
+            active_lts = repo.get_by_empire(self.empire_id, status="active")
 
-        if not active_lts:
-            return None
+            if not active_lts:
+                return None
 
-        # Calculate fleet average for load balancing
-        task_counts = [lt.tasks_completed + lt.tasks_failed for lt in active_lts]
-        avg_tasks = sum(task_counts) / len(task_counts) if task_counts else 0
+            # Calculate fleet average for load balancing
+            task_counts = [lt.tasks_completed + lt.tasks_failed for lt in active_lts]
+            avg_tasks = sum(task_counts) / len(task_counts) if task_counts else 0
 
-        best_score = -1
-        best_lt = None
-        desc_lower = task_description.lower()
+            best_score = -1
+            best_lt = None
+            desc_lower = task_description.lower()
 
-        for db_lt in active_lts:
-            score = 0.0
-            lt_tasks = db_lt.tasks_completed + db_lt.tasks_failed
+            for db_lt in active_lts:
+                score = 0.0
+                lt_tasks = db_lt.tasks_completed + db_lt.tasks_failed
 
-            # Domain match (strongest signal)
-            if db_lt.domain and db_lt.domain.lower() in desc_lower:
-                score += 0.35
+                # Domain match (strongest signal)
+                if db_lt.domain and db_lt.domain.lower() in desc_lower:
+                    score += 0.35
 
-            # Specialization match
-            specs = db_lt.specializations_json or []
-            matched_specs = sum(1 for spec in specs if spec.lower() in desc_lower)
-            score += min(0.3, matched_specs * 0.1)
+                # Specialization match
+                specs = db_lt.specializations_json or []
+                matched_specs = sum(1 for spec in specs if spec.lower() in desc_lower)
+                score += min(0.3, matched_specs * 0.1)
 
-            # Task type match
-            if task_type:
-                type_domain_map = {
-                    "research": ["research", "data_science"],
-                    "analysis": ["strategy", "finance", "data_science", "industry"],
-                    "code": ["technology", "tooling"],
-                    "content": ["content"],
-                    "security": ["security"],
-                }
-                matching_domains = type_domain_map.get(task_type, [])
-                if db_lt.domain in matching_domains:
+                # Task type match
+                if task_type:
+                    type_domain_map = {
+                        "research": ["research", "data_science"],
+                        "analysis": ["strategy", "finance", "data_science", "industry"],
+                        "code": ["technology", "tooling"],
+                        "content": ["content"],
+                        "security": ["security"],
+                    }
+                    matching_domains = type_domain_map.get(task_type, [])
+                    if db_lt.domain in matching_domains:
+                        score += 0.15
+
+                # Performance bonus (small — don't let it dominate)
+                score += db_lt.performance_score * 0.1
+
+                # Load balancing penalty — penalize lieutenants with above-average tasks
+                if avg_tasks > 0 and lt_tasks > avg_tasks:
+                    overload_ratio = lt_tasks / avg_tasks
+                    penalty = min(0.4, (overload_ratio - 1) * 0.15)
+                    score -= penalty
+
+                # Bonus for underutilized lieutenants
+                if avg_tasks > 0 and lt_tasks < avg_tasks * 0.5:
                     score += 0.15
 
-            # Performance bonus (small — don't let it dominate)
-            score += db_lt.performance_score * 0.1
+                # Currently busy penalty
+                if db_lt.current_task_id:
+                    score -= 0.1
 
-            # Load balancing penalty — penalize lieutenants with above-average tasks
-            if avg_tasks > 0 and lt_tasks > avg_tasks:
-                overload_ratio = lt_tasks / avg_tasks
-                penalty = min(0.4, (overload_ratio - 1) * 0.15)
-                score -= penalty
-
-            # Bonus for underutilized lieutenants
-            if avg_tasks > 0 and lt_tasks < avg_tasks * 0.5:
-                score += 0.15
-
-            # Currently busy penalty
-            if db_lt.current_task_id:
-                score -= 0.1
-
-            if score > best_score:
-                best_score = score
-                best_lt = db_lt
+                if score > best_score:
+                    best_score = score
+                    best_lt = db_lt
+        finally:
+            self._close_repo(repo)
 
         if best_lt:
             return self.get_lieutenant(best_lt.id)
@@ -281,54 +309,63 @@ class LieutenantManager:
     def get_available_lieutenants(self, capabilities: list[str] | None = None) -> list[Lieutenant]:
         """Get all available (active and idle) lieutenants."""
         repo = self._get_repo()
-        idle = repo.get_idle_lieutenants(self.empire_id)
+        try:
+            idle = repo.get_idle_lieutenants(self.empire_id)
 
-        lieutenants = []
-        for db_lt in idle:
-            if capabilities:
-                specs = set(db_lt.specializations_json or [])
-                if not any(c in specs for c in capabilities):
-                    continue
-            lt = self.get_lieutenant(db_lt.id)
-            if lt:
-                lieutenants.append(lt)
+            lieutenants = []
+            for db_lt in idle:
+                if capabilities:
+                    specs = set(db_lt.specializations_json or [])
+                    if not any(c in specs for c in capabilities):
+                        continue
+                lt = self.get_lieutenant(db_lt.id)
+                if lt:
+                    lieutenants.append(lt)
 
-        return lieutenants
+            return lieutenants
+        finally:
+            self._close_repo(repo)
 
     def run_all_learning_cycles(self) -> dict:
         """Run learning cycles for all lieutenants that need them."""
         repo = self._get_repo()
-        due = repo.needs_learning(self.empire_id)
+        try:
+            due = repo.needs_learning(self.empire_id)
 
-        results = {"lieutenants_processed": 0, "total_gaps": 0, "total_researched": 0}
+            results = {"lieutenants_processed": 0, "total_gaps": 0, "total_researched": 0}
 
-        for db_lt in due:
-            lt = self.get_lieutenant(db_lt.id)
-            if lt:
-                cycle_result = lt.run_learning_cycle()
-                results["lieutenants_processed"] += 1
-                results["total_gaps"] += cycle_result.get("gaps_found", 0)
-                results["total_researched"] += cycle_result.get("researched", 0)
+            for db_lt in due:
+                lt = self.get_lieutenant(db_lt.id)
+                if lt:
+                    cycle_result = lt.run_learning_cycle()
+                    results["lieutenants_processed"] += 1
+                    results["total_gaps"] += cycle_result.get("gaps_found", 0)
+                    results["total_researched"] += cycle_result.get("researched", 0)
 
-                repo.update(db_lt.id, last_learning_at=datetime.now(timezone.utc))
+                    repo.update(db_lt.id, last_learning_at=datetime.now(timezone.utc))
 
-        repo.commit()
-        logger.info("Learning cycles complete: %s", results)
-        return results
+            repo.commit()
+            logger.info("Learning cycles complete: %s", results)
+            return results
+        finally:
+            self._close_repo(repo)
 
     def get_fleet_stats(self) -> FleetStats:
         """Get fleet-level statistics."""
         repo = self._get_repo()
-        summary = repo.get_fleet_summary(self.empire_id)
+        try:
+            summary = repo.get_fleet_summary(self.empire_id)
 
-        return FleetStats(
-            total=summary.get("total_lieutenants", 0),
-            active=summary.get("by_status", {}).get("active", 0),
-            inactive=summary.get("by_status", {}).get("inactive", 0),
-            total_tasks=summary.get("total_tasks_completed", 0) + summary.get("total_tasks_failed", 0),
-            avg_performance=summary.get("avg_performance", 0),
-            total_cost=summary.get("total_cost_usd", 0),
-        )
+            return FleetStats(
+                total=summary.get("total_lieutenants", 0),
+                active=summary.get("by_status", {}).get("active", 0),
+                inactive=summary.get("by_status", {}).get("inactive", 0),
+                total_tasks=summary.get("total_tasks_completed", 0) + summary.get("total_tasks_failed", 0),
+                avg_performance=summary.get("avg_performance", 0),
+                total_cost=summary.get("total_cost_usd", 0),
+            )
+        finally:
+            self._close_repo(repo)
 
     def clone_lieutenant(
         self,
@@ -369,11 +406,14 @@ class LieutenantManager:
     ) -> None:
         """Update lieutenant performance after a task."""
         repo = self._get_repo()
-        repo.update_performance(
-            lieutenant_id=lieutenant_id,
-            task_succeeded=task_succeeded,
-            quality_score=quality_score,
-            cost_usd=cost_usd,
-            execution_time=execution_time,
-        )
-        repo.commit()
+        try:
+            repo.update_performance(
+                lieutenant_id=lieutenant_id,
+                task_succeeded=task_succeeded,
+                quality_score=quality_score,
+                cost_usd=cost_usd,
+                execution_time=execution_time,
+            )
+            repo.commit()
+        finally:
+            self._close_repo(repo)

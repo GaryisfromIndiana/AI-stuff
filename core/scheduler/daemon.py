@@ -255,6 +255,15 @@ class SchedulerDaemon:
             description="Enrich low-detail knowledge graph entities",
         ))
 
+        self.register_job(JobConfig(
+            name="cross_synthesis",
+            job_type="cross_synthesis",
+            interval_seconds=28800,  # 8 hours
+            handler=self._run_cross_synthesis,
+            priority=5,
+            description="Synthesize overlapping knowledge across lieutenant domains",
+        ))
+
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
         with self._lock:
@@ -687,4 +696,20 @@ class SchedulerDaemon:
             }
         except Exception as e:
             logger.warning("Shallow enrichment failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_cross_synthesis(self) -> dict:
+        """Find cross-domain overlaps and synthesize insights."""
+        try:
+            from core.research.cross_synthesis import CrossLieutenantSynthesizer
+            synthesizer = CrossLieutenantSynthesizer(self.empire_id)
+            result = synthesizer.run_synthesis_cycle(max_syntheses=3)
+            return {
+                "overlaps_detected": result.overlaps_detected,
+                "syntheses_produced": result.syntheses_produced,
+                "insights": result.total_insights,
+                "cost_usd": result.total_cost_usd,
+            }
+        except Exception as e:
+            logger.warning("Cross-lieutenant synthesis failed: %s", e)
             return {"error": str(e)}

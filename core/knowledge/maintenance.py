@@ -244,7 +244,18 @@ class KnowledgeMaintainer:
         """
         repo = self._get_repo()
         try:
-            entities = repo.get_by_empire(self.empire_id, limit=10000)
+            from sqlalchemy import select
+            from sqlalchemy.orm import joinedload
+            from db.models import KnowledgeEntity
+
+            # Eager load outgoing_relations to avoid N+1 queries
+            stmt = (
+                select(KnowledgeEntity)
+                .where(KnowledgeEntity.empire_id == self.empire_id)
+                .options(joinedload(KnowledgeEntity.outgoing_relations))
+                .limit(10000)
+            )
+            entities = list(repo.session.execute(stmt).scalars().unique().all())
 
             report = ValidationReport()
             entity_ids = {e.id for e in entities}

@@ -1401,3 +1401,61 @@ def api_enrichment_run():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Cross-Lieutenant Synthesis ─────────────────────────────────────────
+
+@api_bp.route("/synthesis/overlaps")
+def api_cross_synthesis_overlaps():
+    """Detect cross-domain knowledge overlaps between lieutenants."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    try:
+        from core.research.cross_synthesis import CrossLieutenantSynthesizer
+        synthesizer = CrossLieutenantSynthesizer(empire_id)
+        overlaps = synthesizer.detect_overlaps()
+        return jsonify([
+            {
+                "topic": o.topic,
+                "domains": o.domains,
+                "shared_entities": len(o.shared_entities),
+                "overlap_score": round(o.overlap_score, 2),
+                "entities": [e["name"] for e in o.shared_entities[:5]],
+            }
+            for o in overlaps[:10]
+        ])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/synthesis/run", methods=["POST"])
+@rate_limit(requests_per_minute=2, requests_per_hour=10)
+def api_cross_synthesis_run():
+    """Run cross-lieutenant synthesis cycle."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json(silent=True) or {}
+    max_syntheses = min(data.get("max_syntheses", 3), 5)
+
+    try:
+        from core.research.cross_synthesis import CrossLieutenantSynthesizer
+        synthesizer = CrossLieutenantSynthesizer(empire_id)
+        result = synthesizer.run_synthesis_cycle(max_syntheses=max_syntheses)
+        return jsonify({
+            "overlaps_detected": result.overlaps_detected,
+            "syntheses_produced": result.syntheses_produced,
+            "total_insights": result.total_insights,
+            "cost_usd": round(result.total_cost_usd, 4),
+            "results": [
+                {
+                    "topic": r.topic,
+                    "domains": r.domains,
+                    "entities_involved": r.entities_involved,
+                    "connections_found": r.connections_found,
+                    "insights": r.insights[:5],
+                    "synthesis": r.synthesis[:1000],
+                    "cost_usd": round(r.cost_usd, 4),
+                }
+                for r in result.results
+            ],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
