@@ -85,10 +85,20 @@ class KnowledgeMaintainer:
         return self._graph
 
     def _get_repo(self):
-        """Get a fresh repository with its own session."""
+        """Get a fresh repository with its own session.
+
+        IMPORTANT: Caller must close via repo.session.close() in a finally block.
+        """
         from db.engine import get_session
         from db.repositories.knowledge import KnowledgeRepository
         return KnowledgeRepository(get_session())
+
+    def _close_repo(self, repo) -> None:
+        """Close the session owned by a repository."""
+        try:
+            repo.session.close()
+        except Exception:
+            pass
 
     def run_maintenance(self) -> KnowledgeReport:
         """Run full maintenance cycle.
@@ -152,35 +162,38 @@ class KnowledgeMaintainer:
             List of duplicate groups.
         """
         repo = self._get_repo()
-        entities = repo.get_by_empire(self.empire_id, limit=5000)
+        try:
+            entities = repo.get_by_empire(self.empire_id, limit=5000)
 
-        # Group by normalized name
-        name_groups: dict[str, list] = {}
-        for entity in entities:
-            normalized = entity.name.lower().strip()
-            # Also check without common suffixes/prefixes
-            key = normalized.replace("the ", "").replace("a ", "").strip()
-            if key not in name_groups:
-                name_groups[key] = []
-            name_groups[key].append({
-                "id": entity.id,
-                "name": entity.name,
-                "type": entity.entity_type,
-                "confidence": entity.confidence,
-            })
+            # Group by normalized name
+            name_groups: dict[str, list] = {}
+            for entity in entities:
+                normalized = entity.name.lower().strip()
+                # Also check without common suffixes/prefixes
+                key = normalized.replace("the ", "").replace("a ", "").strip()
+                if key not in name_groups:
+                    name_groups[key] = []
+                name_groups[key].append({
+                    "id": entity.id,
+                    "name": entity.name,
+                    "type": entity.entity_type,
+                    "confidence": entity.confidence,
+                })
 
-        duplicates = []
-        for key, group in name_groups.items():
-            if len(group) > 1:
-                # Find the one with highest confidence as merge target
-                best = max(group, key=lambda x: x["confidence"])
-                duplicates.append(DuplicateGroup(
-                    entities=group,
-                    similarity=0.95,
-                    suggested_merge=best["name"],
-                ))
+            duplicates = []
+            for key, group in name_groups.items():
+                if len(group) > 1:
+                    # Find the one with highest confidence as merge target
+                    best = max(group, key=lambda x: x["confidence"])
+                    duplicates.append(DuplicateGroup(
+                        entities=group,
+                        similarity=0.95,
+                        suggested_merge=best["name"],
+                    ))
 
-        return duplicates
+            return duplicates
+        finally:
+            self._close_repo(repo)
 
     def merge_duplicates(self, groups: list[DuplicateGroup]) -> MergeResult:
         """Merge duplicate entity groups.
@@ -216,9 +229,12 @@ class KnowledgeMaintainer:
             Number of entities decayed.
         """
         repo = self._get_repo()
-        count = repo.decay_confidence(self.empire_id, days_threshold, rate)
-        repo.commit()
-        return count
+        try:
+            count = repo.decay_confidence(self.empire_id, days_threshold, rate)
+            repo.commit()
+            return count
+        finally:
+            self._close_repo(repo)
 
     def validate_relations(self) -> ValidationReport:
         """Check for broken or invalid relations.
@@ -227,23 +243,26 @@ class KnowledgeMaintainer:
             ValidationReport.
         """
         repo = self._get_repo()
-        entities = repo.get_by_empire(self.empire_id, limit=10000)
+        try:
+            entities = repo.get_by_empire(self.empire_id, limit=10000)
 
-        report = ValidationReport()
-        entity_ids = {e.id for e in entities}
+            report = ValidationReport()
+            entity_ids = {e.id for e in entities}
 
-        for entity in entities:
-            for rel in (entity.outgoing_relations or []):
-                report.total_relations += 1
-                if rel.target_entity_id not in entity_ids:
-                    report.broken_relations += 1
-                    report.issues.append(
-                        f"Broken relation: {entity.name} -> {rel.target_entity_id} ({rel.relation_type})"
-                    )
-                else:
-                    report.valid_relations += 1
+            for entity in entities:
+                for rel in (entity.outgoing_relations or []):
+                    report.total_relations += 1
+                    if rel.target_entity_id not in entity_ids:
+                        report.broken_relations += 1
+                        report.issues.append(
+                            f"Broken relation: {entity.name} -> {rel.target_entity_id} ({rel.relation_type})"
+                        )
+                    else:
+                        report.valid_relations += 1
 
-        return report
+            return report
+        finally:
+            self._close_repo(repo)
 
     def update_importance_scores(self) -> None:
         """Recalculate PageRank-style importance scores."""
@@ -265,18 +284,21 @@ class KnowledgeMaintainer:
             sm = SemanticMemory(mm)
 
             repo = self._get_repo()
-            entities = repo.get_by_empire(self.empire_id, limit=100)
+            try:
+                entities = repo.get_by_empire(self.empire_id, limit=100)
 
-            contradictions = []
-            for entity in entities:
-                found = sm.find_contradictions(entity.description)
-                for c in found:
-                    contradictions.append(Contradiction(
-                        entity_a={"name": entity.name, "description": entity.description},
-                        description=c.explanation,
-                    ))
+                contradictions = []
+                for entity in entities:
+                    found = sm.find_contradictions(entity.description)
+                    for c in found:
+                        contradictions.append(Contradiction(
+                            entity_a={"name": entity.name, "description": entity.description},
+                            description=c.explanation,
+                        ))
 
-            return contradictions
+                return contradictions
+            finally:
+                self._close_repo(repo)
         except Exception as e:
             logger.warning("Contradiction detection failed: %s", e)
             return []
@@ -370,6 +392,12 @@ class KnowledgeMaintainer:
             Audit results with purged/flagged entity counts.
         """
         repo = self._get_repo()
+        try:
+            return self._deep_llm_audit_impl(repo, batch_size)
+        finally:
+            self._close_repo(repo)
+
+    def _deep_llm_audit_impl(self, repo, batch_size: int) -> dict:
         entities = repo.get_by_empire(self.empire_id, limit=batch_size)
 
         if not entities:
@@ -473,10 +501,13 @@ class KnowledgeMaintainer:
             List of spawn recommendations with topic, entity count, and suggested config.
         """
         repo = self._get_repo()
-        entities = repo.get_by_empire(self.empire_id, limit=5000)
+        try:
+            entities = repo.get_by_empire(self.empire_id, limit=5000)
 
-        if not entities:
-            return []
+            if not entities:
+                return []
+        finally:
+            self._close_repo(repo)
 
         # Get existing lieutenant domains
         try:

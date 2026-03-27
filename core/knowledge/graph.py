@@ -94,10 +94,21 @@ class KnowledgeGraph:
         self._repo = None
 
     def _get_repo(self):
-        """Get a fresh repository with its own session."""
+        """Get a fresh repository with its own session.
+
+        IMPORTANT: Caller must close the session via repo.session.close()
+        or use _repo_scope() instead.
+        """
         from db.engine import get_session
         from db.repositories.knowledge import KnowledgeRepository
         return KnowledgeRepository(get_session())
+
+    def _close_repo(self, repo) -> None:
+        """Close the session owned by a repository."""
+        try:
+            repo.session.close()
+        except Exception:
+            pass
 
     def add_entity(
         self,
@@ -130,114 +141,95 @@ class KnowledgeGraph:
         from datetime import datetime, timezone
 
         repo = self._get_repo()
+        try:
+            # Enrich attributes with temporal data
+            enriched_attrs = dict(attributes or {})
+            if valid_from:
+                enriched_attrs["valid_from"] = valid_from
+            if valid_to:
+                enriched_attrs["valid_to"] = valid_to
+            enriched_attrs["last_seen"] = datetime.now(timezone.utc).isoformat()
 
-        # Enrich attributes with temporal data
-        enriched_attrs = dict(attributes or {})
-        if valid_from:
-            enriched_attrs["valid_from"] = valid_from
-        if valid_to:
-            enriched_attrs["valid_to"] = valid_to
-        enriched_attrs["last_seen"] = datetime.now(timezone.utc).isoformat()
+            # Check for existing entity with same name
+            existing = repo.get_by_name(name, self.empire_id)
+            if existing:
+                # Update existing entity — merge attributes, bump confidence
+                merged_attrs = dict(existing.attributes_json or {})
+                merged_attrs.update(enriched_attrs)
+                merged_attrs["update_count"] = merged_attrs.get("update_count", 0) + 1
 
-        # Check for existing entity with same name
-        existing = repo.get_by_name(name, self.empire_id)
-        if existing:
-            # Update existing entity — merge attributes, bump confidence
-            merged_attrs = dict(existing.attributes_json or {})
-            merged_attrs.update(enriched_attrs)
-            merged_attrs["update_count"] = merged_attrs.get("update_count", 0) + 1
+                update_fields = {"attributes_json": merged_attrs, "updated_at": datetime.now(timezone.utc)}
+                if confidence > existing.confidence:
+                    update_fields["confidence"] = confidence
+                if description and len(description) > len(existing.description or ""):
+                    update_fields["description"] = description
 
-            update_fields = {"attributes_json": merged_attrs, "updated_at": datetime.now(timezone.utc)}
-            if confidence > existing.confidence:
-                update_fields["confidence"] = confidence
-            if description and len(description) > len(existing.description or ""):
-                update_fields["description"] = description
+                repo.update(existing.id, **update_fields)
+                repo.commit()
+                return {"id": existing.id, "name": name, "action": "updated"}
 
-            repo.update(existing.id, **update_fields)
+            entity = repo.create(
+                empire_id=self.empire_id,
+                entity_type=entity_type,
+                name=name,
+                description=description,
+                attributes_json=enriched_attrs,
+                confidence=confidence,
+                source_task_id=source_task_id or None,
+                tags_json=tags or [],
+            )
             repo.commit()
-            return {"id": existing.id, "name": name, "action": "updated"}
-
-        entity = repo.create(
-            empire_id=self.empire_id,
-            entity_type=entity_type,
-            name=name,
-            description=description,
-            attributes_json=enriched_attrs,
-            confidence=confidence,
-            source_task_id=source_task_id or None,
-            tags_json=tags or [],
-        )
-        repo.commit()
-        return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}
+            return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}
+        finally:
+            self._close_repo(repo)
 
     def update_entity(self, name: str, description: str = "", **kwargs) -> bool:
-        """Update an existing entity's description or other fields.
-
-        Args:
-            name: Entity name to update.
-            description: New description.
-            **kwargs: Additional fields to update.
-
-        Returns:
-            True if entity was found and updated.
-        """
+        """Update an existing entity's description or other fields."""
         from datetime import datetime, timezone
         repo = self._get_repo()
-        entity = repo.get_by_name(name, self.empire_id)
-        if not entity:
-            return False
-
-        update_fields = {"updated_at": datetime.now(timezone.utc)}
-        if description:
-            update_fields["description"] = description
-        update_fields.update(kwargs)
-
-        repo.update(entity.id, **update_fields)
-        repo.commit()
-        return True
+        try:
+            entity = repo.get_by_name(name, self.empire_id)
+            if not entity:
+                return False
+            update_fields = {"updated_at": datetime.now(timezone.utc)}
+            if description:
+                update_fields["description"] = description
+            update_fields.update(kwargs)
+            repo.update(entity.id, **update_fields)
+            repo.commit()
+            return True
+        finally:
+            self._close_repo(repo)
 
     def update_entity_attributes(self, name: str, attributes: dict) -> bool:
-        """Merge new attributes into an existing entity's attributes.
-
-        Args:
-            name: Entity name.
-            attributes: Attributes to merge in.
-
-        Returns:
-            True if entity was found and updated.
-        """
+        """Merge new attributes into an existing entity's attributes."""
         from datetime import datetime, timezone
         repo = self._get_repo()
-        entity = repo.get_by_name(name, self.empire_id)
-        if not entity:
-            return False
-
-        merged = dict(entity.attributes_json or {})
-        merged.update(attributes)
-
-        repo.update(entity.id, attributes_json=merged, updated_at=datetime.now(timezone.utc))
-        repo.commit()
-        return True
+        try:
+            entity = repo.get_by_name(name, self.empire_id)
+            if not entity:
+                return False
+            merged = dict(entity.attributes_json or {})
+            merged.update(attributes)
+            repo.update(entity.id, attributes_json=merged, updated_at=datetime.now(timezone.utc))
+            repo.commit()
+            return True
+        finally:
+            self._close_repo(repo)
 
     def boost_confidence(self, name: str, amount: float = 0.05) -> bool:
-        """Boost an entity's confidence score by a small amount.
-
-        Args:
-            name: Entity name.
-            amount: Amount to boost (capped at 1.0).
-
-        Returns:
-            True if entity was found and updated.
-        """
+        """Boost an entity's confidence score by a small amount."""
         repo = self._get_repo()
-        entity = repo.get_by_name(name, self.empire_id)
-        if not entity:
-            return False
-
-        new_confidence = min(1.0, entity.confidence + amount)
-        repo.update(entity.id, confidence=new_confidence)
-        repo.commit()
-        return True
+        try:
+            entity = repo.get_by_name(name, self.empire_id)
+            if not entity:
+                return False
+            new_confidence = min(1.0, entity.confidence + amount)
+            repo.update(entity.id, confidence=new_confidence)
+            repo.commit()
+            return True
+        finally:
+            self._close_repo(repo)
 
     # Bidirectional relation labels
     INVERSE_RELATIONS: dict[str, str] = {
@@ -302,47 +294,49 @@ class KnowledgeGraph:
         target_id, _ = resolver.resolve_and_get_id(target_name)
 
         repo = self._get_repo()
+        try:
+            if not source_id:
+                source = repo.get_by_name(source_name, self.empire_id)
+                source_id = source.id if source else ""
+            if not target_id:
+                target = repo.get_by_name(target_name, self.empire_id)
+                target_id = target.id if target else ""
 
-        if not source_id:
-            source = repo.get_by_name(source_name, self.empire_id)
-            source_id = source.id if source else ""
-        if not target_id:
-            target = repo.get_by_name(target_name, self.empire_id)
-            target_id = target.id if target else ""
+            if not source_id or not target_id:
+                return None
 
-        if not source_id or not target_id:
-            return None
+            # Enrich metadata
+            from datetime import datetime as dt, timezone as tz
+            enriched_meta = dict(metadata or {})
+            enriched_meta["valid_from"] = valid_from
+            enriched_meta["valid_to"] = valid_to
+            enriched_meta["evidence"] = evidence
+            enriched_meta["source_task_id"] = source_task_id
+            enriched_meta["created_at"] = dt.now(tz.utc).isoformat()
 
-        # Enrich metadata
-        from datetime import datetime as dt, timezone as tz
-        enriched_meta = dict(metadata or {})
-        enriched_meta["valid_from"] = valid_from
-        enriched_meta["valid_to"] = valid_to
-        enriched_meta["evidence"] = evidence
-        enriched_meta["source_task_id"] = source_task_id
-        enriched_meta["created_at"] = dt.now(tz.utc).isoformat()
+            # Get inverse label
+            inverse = self.INVERSE_RELATIONS.get(relation_type, "related_to")
+            enriched_meta["inverse_label"] = inverse
+            enriched_meta["forward_label"] = relation_type
 
-        # Get inverse label
-        inverse = self.INVERSE_RELATIONS.get(relation_type, "related_to")
-        enriched_meta["inverse_label"] = inverse
-        enriched_meta["forward_label"] = relation_type
-
-        relation = repo.add_relation(
-            source_id=source_id,
-            target_id=target_id,
-            relation_type=relation_type,
-            weight=weight,
-            confidence=confidence,
-            metadata=enriched_meta,
-        )
-        repo.commit()
-        return {
-            "id": relation.id,
-            "source": source_name,
-            "target": target_name,
-            "type": relation_type,
-            "inverse": inverse,
-        }
+            relation = repo.add_relation(
+                source_id=source_id,
+                target_id=target_id,
+                relation_type=relation_type,
+                weight=weight,
+                confidence=confidence,
+                metadata=enriched_meta,
+            )
+            repo.commit()
+            return {
+                "id": relation.id,
+                "source": source_name,
+                "target": target_name,
+                "type": relation_type,
+                "inverse": inverse,
+            }
+        finally:
+            self._close_repo(repo)
 
     def find_entities(
         self,
@@ -353,24 +347,26 @@ class KnowledgeGraph:
     ) -> list[GraphNode]:
         """Find entities matching a query."""
         repo = self._get_repo()
+        try:
+            if query:
+                entities = repo.search_entities(query, self.empire_id, entity_type or None, limit)
+            else:
+                entities = repo.get_by_empire(self.empire_id, entity_type or None, min_confidence, limit)
 
-        if query:
-            entities = repo.search_entities(query, self.empire_id, entity_type or None, limit)
-        else:
-            entities = repo.get_by_empire(self.empire_id, entity_type or None, min_confidence, limit)
-
-        return [
-            GraphNode(
-                entity_id=e.id,
-                name=e.name,
-                entity_type=e.entity_type,
-                description=e.description,
-                attributes=e.attributes_json or {},
-                confidence=e.confidence,
-                importance=e.importance_score,
-            )
-            for e in entities
-        ]
+            return [
+                GraphNode(
+                    entity_id=e.id,
+                    name=e.name,
+                    entity_type=e.entity_type,
+                    description=e.description,
+                    attributes=e.attributes_json or {},
+                    confidence=e.confidence,
+                    importance=e.importance_score,
+                )
+                for e in entities
+            ]
+        finally:
+            self._close_repo(repo)
 
     def get_neighbors(
         self,
@@ -380,23 +376,26 @@ class KnowledgeGraph:
     ) -> list[GraphNode]:
         """Get neighboring entities up to max_depth."""
         repo = self._get_repo()
-        entity = repo.get_by_name(entity_name, self.empire_id)
-        if not entity:
-            return []
+        try:
+            entity = repo.get_by_name(entity_name, self.empire_id)
+            if not entity:
+                return []
 
-        neighbors_data = repo.get_neighbors(entity.id, max_depth, relation_types)
-        return [
-            GraphNode(
-                entity_id=n["entity"].id,
-                name=n["entity"].name,
-                entity_type=n["entity"].entity_type,
-                description=n["entity"].description,
-                confidence=n["entity"].confidence,
-                importance=n["entity"].importance_score,
-                depth=n["depth"],
-            )
-            for n in neighbors_data
-        ]
+            neighbors_data = repo.get_neighbors(entity.id, max_depth, relation_types)
+            return [
+                GraphNode(
+                    entity_id=n["entity"].id,
+                    name=n["entity"].name,
+                    entity_type=n["entity"].entity_type,
+                    description=n["entity"].description,
+                    confidence=n["entity"].confidence,
+                    importance=n["entity"].importance_score,
+                    depth=n["depth"],
+                )
+                for n in neighbors_data
+            ]
+        finally:
+            self._close_repo(repo)
 
     def find_path(
         self,
@@ -406,14 +405,16 @@ class KnowledgeGraph:
     ) -> list[dict] | None:
         """Find shortest path between two entities."""
         repo = self._get_repo()
+        try:
+            source = repo.get_by_name(source_name, self.empire_id)
+            target = repo.get_by_name(target_name, self.empire_id)
 
-        source = repo.get_by_name(source_name, self.empire_id)
-        target = repo.get_by_name(target_name, self.empire_id)
+            if not source or not target:
+                return None
 
-        if not source or not target:
-            return None
-
-        return repo.find_path(source.id, target.id, max_depth)
+            return repo.find_path(source.id, target.id, max_depth)
+        finally:
+            self._close_repo(repo)
 
     def get_subgraph(
         self,
@@ -424,59 +425,65 @@ class KnowledgeGraph:
         neighbors = self.get_neighbors(center_name, max_depth=depth)
 
         repo = self._get_repo()
-        center = repo.get_by_name(center_name, self.empire_id)
+        try:
+            center = repo.get_by_name(center_name, self.empire_id)
 
-        nodes = []
-        if center:
-            nodes.append(GraphNode(
-                entity_id=center.id,
-                name=center.name,
-                entity_type=center.entity_type,
-                description=center.description,
-                confidence=center.confidence,
-                importance=center.importance_score,
-                depth=0,
-            ))
-        nodes.extend(neighbors)
+            nodes = []
+            if center:
+                nodes.append(GraphNode(
+                    entity_id=center.id,
+                    name=center.name,
+                    entity_type=center.entity_type,
+                    description=center.description,
+                    confidence=center.confidence,
+                    importance=center.importance_score,
+                    depth=0,
+                ))
+            nodes.extend(neighbors)
 
-        # Get edges between all nodes
-        node_ids = {n.entity_id for n in nodes}
-        edges = []
-        for node in nodes:
-            relations = repo.get_relations(node.entity_id, direction="outgoing")
-            for rel in relations:
-                if rel.target_entity_id in node_ids:
-                    edges.append(GraphEdge(
-                        source_id=rel.source_entity_id,
-                        target_id=rel.target_entity_id,
-                        relation_type=rel.relation_type,
-                        weight=rel.weight,
-                        confidence=rel.confidence,
-                    ))
+            # Get edges between all nodes
+            node_ids = {n.entity_id for n in nodes}
+            edges = []
+            for node in nodes:
+                relations = repo.get_relations(node.entity_id, direction="outgoing")
+                for rel in relations:
+                    if rel.target_entity_id in node_ids:
+                        edges.append(GraphEdge(
+                            source_id=rel.source_entity_id,
+                            target_id=rel.target_entity_id,
+                            relation_type=rel.relation_type,
+                            weight=rel.weight,
+                            confidence=rel.confidence,
+                        ))
 
-        return SubGraph(
-            nodes=nodes,
-            edges=edges,
-            center_entity_id=center.id if center else "",
-        )
+            return SubGraph(
+                nodes=nodes,
+                edges=edges,
+                center_entity_id=center.id if center else "",
+            )
+        finally:
+            self._close_repo(repo)
 
     def get_central_entities(self, limit: int = 10) -> list[GraphNode]:
         """Get the most connected/important entities."""
         repo = self._get_repo()
-        most_connected = repo.get_most_connected(self.empire_id, limit)
+        try:
+            most_connected = repo.get_most_connected(self.empire_id, limit)
 
-        return [
-            GraphNode(
-                entity_id=mc["entity"].id,
-                name=mc["entity"].name,
-                entity_type=mc["entity"].entity_type,
-                description=mc["entity"].description,
-                confidence=mc["entity"].confidence,
-                importance=mc["entity"].importance_score,
-            )
-            for mc in most_connected
-            if mc["entity"]
-        ]
+            return [
+                GraphNode(
+                    entity_id=mc["entity"].id,
+                    name=mc["entity"].name,
+                    entity_type=mc["entity"].entity_type,
+                    description=mc["entity"].description,
+                    confidence=mc["entity"].confidence,
+                    importance=mc["entity"].importance_score,
+                )
+                for mc in most_connected
+                if mc["entity"]
+            ]
+        finally:
+            self._close_repo(repo)
 
     def compute_pagerank(self, damping: float = 0.85, iterations: int = 20) -> dict[str, float]:
         """Compute PageRank-style importance scores for all entities.
@@ -489,40 +496,43 @@ class KnowledgeGraph:
             Dict of entity_id → importance score.
         """
         repo = self._get_repo()
-        entities = repo.get_by_empire(self.empire_id, limit=10000)
+        try:
+            entities = repo.get_by_empire(self.empire_id, limit=10000)
 
-        if not entities:
-            return {}
+            if not entities:
+                return {}
 
-        # Build adjacency lists
-        entity_ids = [e.id for e in entities]
-        n = len(entity_ids)
-        scores = {eid: 1.0 / n for eid in entity_ids}
-        outgoing: dict[str, list[str]] = defaultdict(list)
+            # Build adjacency lists
+            entity_ids = [e.id for e in entities]
+            n = len(entity_ids)
+            scores = {eid: 1.0 / n for eid in entity_ids}
+            outgoing: dict[str, list[str]] = defaultdict(list)
 
-        for entity in entities:
-            for rel in (entity.outgoing_relations or []):
-                outgoing[entity.id].append(rel.target_entity_id)
+            for entity in entities:
+                for rel in (entity.outgoing_relations or []):
+                    outgoing[entity.id].append(rel.target_entity_id)
 
-        # Iterate
-        for _ in range(iterations):
-            new_scores: dict[str, float] = {}
-            for eid in entity_ids:
-                rank = (1.0 - damping) / n
-                for source_id in entity_ids:
-                    if eid in outgoing.get(source_id, []):
-                        out_count = len(outgoing[source_id])
-                        if out_count > 0:
-                            rank += damping * scores[source_id] / out_count
-                new_scores[eid] = rank
-            scores = new_scores
+            # Iterate
+            for _ in range(iterations):
+                new_scores: dict[str, float] = {}
+                for eid in entity_ids:
+                    rank = (1.0 - damping) / n
+                    for source_id in entity_ids:
+                        if eid in outgoing.get(source_id, []):
+                            out_count = len(outgoing[source_id])
+                            if out_count > 0:
+                                rank += damping * scores[source_id] / out_count
+                    new_scores[eid] = rank
+                scores = new_scores
 
-        # Update importance scores in DB
-        for eid, score in scores.items():
-            repo.update_importance(eid, min(1.0, score * n))  # Normalize
+            # Update importance scores in DB
+            for eid, score in scores.items():
+                repo.update_importance(eid, min(1.0, score * n))  # Normalize
 
-        repo.commit()
-        return scores
+            repo.commit()
+            return scores
+        finally:
+            self._close_repo(repo)
 
     def merge_entities(self, entity_names: list[str]) -> dict | None:
         """Merge duplicate entities into one.
@@ -533,98 +543,110 @@ class KnowledgeGraph:
             return None
 
         repo = self._get_repo()
-        entities = [repo.get_by_name(name, self.empire_id) for name in entity_names]
-        entities = [e for e in entities if e is not None]
+        try:
+            entities = [repo.get_by_name(name, self.empire_id) for name in entity_names]
+            entities = [e for e in entities if e is not None]
 
-        if len(entities) < 2:
-            return None
+            if len(entities) < 2:
+                return None
 
-        # Keep the one with highest confidence
-        primary = max(entities, key=lambda e: e.confidence)
-        others = [e for e in entities if e.id != primary.id]
+            # Keep the one with highest confidence
+            primary = max(entities, key=lambda e: e.confidence)
+            others = [e for e in entities if e.id != primary.id]
 
-        # Merge attributes
-        merged_attrs = dict(primary.attributes_json or {})
-        for other in others:
-            for k, v in (other.attributes_json or {}).items():
-                if k not in merged_attrs:
-                    merged_attrs[k] = v
+            # Merge attributes
+            merged_attrs = dict(primary.attributes_json or {})
+            for other in others:
+                for k, v in (other.attributes_json or {}).items():
+                    if k not in merged_attrs:
+                        merged_attrs[k] = v
 
-        repo.update(primary.id, attributes_json=merged_attrs)
+            repo.update(primary.id, attributes_json=merged_attrs)
 
-        # Transfer relations from others to primary
-        for other in others:
-            for rel in (other.outgoing_relations or []):
-                if rel.target_entity_id != primary.id:
-                    repo.add_relation(
-                        source_id=primary.id,
-                        target_id=rel.target_entity_id,
-                        relation_type=rel.relation_type,
-                        weight=rel.weight,
-                    )
-            for rel in (other.incoming_relations or []):
-                if rel.source_entity_id != primary.id:
-                    repo.add_relation(
-                        source_id=rel.source_entity_id,
-                        target_id=primary.id,
-                        relation_type=rel.relation_type,
-                        weight=rel.weight,
-                    )
-            repo.delete(other.id)
+            # Transfer relations from others to primary
+            for other in others:
+                for rel in (other.outgoing_relations or []):
+                    if rel.target_entity_id != primary.id:
+                        repo.add_relation(
+                            source_id=primary.id,
+                            target_id=rel.target_entity_id,
+                            relation_type=rel.relation_type,
+                            weight=rel.weight,
+                        )
+                for rel in (other.incoming_relations or []):
+                    if rel.source_entity_id != primary.id:
+                        repo.add_relation(
+                            source_id=rel.source_entity_id,
+                            target_id=primary.id,
+                            relation_type=rel.relation_type,
+                            weight=rel.weight,
+                        )
+                repo.delete(other.id)
 
-        repo.commit()
-        return {
-            "primary": primary.id,
-            "merged": [o.id for o in others],
-            "name": primary.name,
-        }
+            repo.commit()
+            return {
+                "primary": primary.id,
+                "merged": [o.id for o in others],
+                "name": primary.name,
+            }
+        finally:
+            self._close_repo(repo)
 
     def prune(self, min_confidence: float = 0.2, min_connections: int = 0) -> int:
         """Remove low-quality entities."""
         repo = self._get_repo()
-        count = repo.prune_low_quality(self.empire_id, min_confidence, min_connections)
-        repo.commit()
-        return count
+        try:
+            count = repo.prune_low_quality(self.empire_id, min_confidence, min_connections)
+            repo.commit()
+            return count
+        finally:
+            self._close_repo(repo)
 
     def get_stats(self) -> GraphStats:
         """Get knowledge graph statistics."""
         repo = self._get_repo()
-        raw = repo.get_graph_stats(self.empire_id)
+        try:
+            raw = repo.get_graph_stats(self.empire_id)
 
-        return GraphStats(
-            entity_count=raw.get("entity_count", 0),
-            relation_count=raw.get("relation_count", 0),
-            entity_types=raw.get("entity_types", {}),
-            avg_connections=raw.get("avg_connections", 0),
-            avg_confidence=raw.get("avg_confidence", 0),
-        )
+            return GraphStats(
+                entity_count=raw.get("entity_count", 0),
+                relation_count=raw.get("relation_count", 0),
+                entity_types=raw.get("entity_types", {}),
+                avg_connections=raw.get("avg_connections", 0),
+                avg_confidence=raw.get("avg_confidence", 0),
+            )
+        finally:
+            self._close_repo(repo)
 
     def export_graph(self) -> dict:
         """Export the graph for sharing or visualization."""
         repo = self._get_repo()
-        entities = repo.get_by_empire(self.empire_id, limit=10000)
+        try:
+            entities = repo.get_by_empire(self.empire_id, limit=10000)
 
-        nodes = []
-        edges = []
+            nodes = []
+            edges = []
 
-        for entity in entities:
-            nodes.append({
-                "id": entity.id,
-                "name": entity.name,
-                "type": entity.entity_type,
-                "description": entity.description,
-                "confidence": entity.confidence,
-                "importance": entity.importance_score,
-            })
-            for rel in (entity.outgoing_relations or []):
-                edges.append({
-                    "source": rel.source_entity_id,
-                    "target": rel.target_entity_id,
-                    "type": rel.relation_type,
-                    "weight": rel.weight,
+            for entity in entities:
+                nodes.append({
+                    "id": entity.id,
+                    "name": entity.name,
+                    "type": entity.entity_type,
+                    "description": entity.description,
+                    "confidence": entity.confidence,
+                    "importance": entity.importance_score,
                 })
+                for rel in (entity.outgoing_relations or []):
+                    edges.append({
+                        "source": rel.source_entity_id,
+                        "target": rel.target_entity_id,
+                        "type": rel.relation_type,
+                        "weight": rel.weight,
+                    })
 
-        return {"nodes": nodes, "edges": edges, "empire_id": self.empire_id}
+            return {"nodes": nodes, "edges": edges, "empire_id": self.empire_id}
+        finally:
+            self._close_repo(repo)
 
     def import_graph(self, data: dict) -> dict:
         """Import a graph from exported data."""
