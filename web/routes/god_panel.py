@@ -285,9 +285,19 @@ def execute_command():
             )
             directive_id = directive.get("id", "")
             if directive_id:
-                def run_bg():
-                    dm2 = DirectiveManager(empire_id)
-                    dm2.execute_directive(directive_id)
+                app = current_app._get_current_object()
+                def run_bg(app_ref=app, eid=empire_id, did=directive_id):
+                    with app_ref.app_context():
+                        try:
+                            dm2 = DirectiveManager(eid)
+                            dm2.execute_directive(did)
+                        except Exception as e:
+                            logger.error("Background directive %s failed: %s", did, e)
+                            try:
+                                dm3 = DirectiveManager(eid)
+                                dm3.cancel_directive(did)
+                            except Exception:
+                                pass
                 threading.Thread(target=run_bg, daemon=True).start()
 
             result["status"] = "executing"
@@ -305,9 +315,19 @@ def execute_command():
             )
             directive_id = directive.get("id", "")
             if directive_id:
-                def run_bg():
-                    dm2 = DirectiveManager(empire_id)
-                    dm2.execute_directive(directive_id)
+                app = current_app._get_current_object()
+                def run_bg(app_ref=app, eid=empire_id, did=directive_id):
+                    with app_ref.app_context():
+                        try:
+                            dm2 = DirectiveManager(eid)
+                            dm2.execute_directive(did)
+                        except Exception as e:
+                            logger.error("Background warroom %s failed: %s", did, e)
+                            try:
+                                dm3 = DirectiveManager(eid)
+                                dm3.cancel_directive(did)
+                            except Exception:
+                                pass
                 threading.Thread(target=run_bg, daemon=True).start()
 
             result["status"] = "debating"

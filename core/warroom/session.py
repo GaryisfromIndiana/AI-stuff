@@ -193,44 +193,44 @@ class WarRoomSession:
                 persona = db_lt.persona_json or {}
                 system_prompt = persona.get("system_prompt_template", f"You are {db_lt.name}, an expert in {db_lt.domain}.")
 
-            prompt = (
-                f"Create a plan for this directive from your {db_lt.domain} perspective:\n\n"
-                f"Directive: {directive_title}\n{directive_description}\n\n"
-                f"Propose specific tasks with their order and who should handle them. Be concise."
-            )
-
-            try:
-                request = LLMRequest(
-                    messages=[LLMMessage.user(prompt)],
-                    system_prompt=system_prompt,
-                    temperature=0.4,
-                    max_tokens=1500,
+                prompt = (
+                    f"Create a plan for this directive from your {db_lt.domain} perspective:\n\n"
+                    f"Directive: {directive_title}\n{directive_description}\n\n"
+                    f"Propose specific tasks with their order and who should handle them. Be concise."
                 )
-                response = router.execute(request, TaskMetadata(task_type="planning", complexity="moderate"))
 
-                plans.append({
-                    "lieutenant_id": participant["id"],
-                    "name": participant.get("name", db_lt.name),
-                    "domain": participant.get("domain", db_lt.domain),
-                    "plan": response.content,
-                    "quality": 0.7,
-                })
-                self._add_message(
-                    participant["id"],
-                    participant.get("name", db_lt.name),
-                    response.content[:500],
-                    "proposal",
-                )
-                self._total_cost += response.cost_usd
-            except Exception as e:
-                logger.warning("Planning failed for %s: %s", db_lt.name, e)
-                plans.append({
-                    "lieutenant_id": participant["id"],
-                    "name": db_lt.name,
-                    "domain": db_lt.domain,
-                    "plan": f"Planning error: {e}",
-                    "quality": 0.0,
-                })
+                try:
+                    request = LLMRequest(
+                        messages=[LLMMessage.user(prompt)],
+                        system_prompt=system_prompt,
+                        temperature=0.4,
+                        max_tokens=1500,
+                    )
+                    response = router.execute(request, TaskMetadata(task_type="planning", complexity="moderate"))
+
+                    plans.append({
+                        "lieutenant_id": participant["id"],
+                        "name": participant.get("name", db_lt.name),
+                        "domain": participant.get("domain", db_lt.domain),
+                        "plan": response.content,
+                        "quality": 0.7,
+                    })
+                    self._add_message(
+                        participant["id"],
+                        participant.get("name", db_lt.name),
+                        response.content[:500],
+                        "proposal",
+                    )
+                    self._total_cost += response.cost_usd
+                except Exception as e:
+                    logger.warning("Planning failed for %s: %s", db_lt.name, e)
+                    plans.append({
+                        "lieutenant_id": participant["id"],
+                        "name": db_lt.name,
+                        "domain": db_lt.domain,
+                        "plan": f"Planning error: {e}",
+                        "quality": 0.0,
+                    })
 
         finally:
             session_db.close()

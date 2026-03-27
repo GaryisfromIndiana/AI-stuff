@@ -226,19 +226,49 @@ class DirectiveManager:
             # Assign lieutenants to tasks before execution
             from core.ace.engine import TaskInput
             task_assignments = []
+
+            # Fetch active lieutenants ONCE instead of per-task DB query
+            repo_lt = lt_manager._get_repo()
+            try:
+                active_lts = repo_lt.get_by_empire(lt_manager.empire_id, status="active")
+            finally:
+                lt_manager._close_repo(repo_lt)
+
             for task_data in tasks:
-                lt = lt_manager.find_best_lieutenant(task_data.get("description", ""))
-                if not lt:
-                    logger.warning("No lieutenant found for task: %s", task_data.get("title", "?")[:50])
-                    wave_task_results.append({
-                        "title": task_data.get("title", ""),
-                        "success": False,
-                        "error": "No lieutenant available",
-                        "quality_score": 0,
-                        "cost_usd": 0,
-                    })
-                    continue
-                task_assignments.append((task_data, lt))
+                desc_lower = task_data.get("description", "").lower()
+                best_lt_db = None
+                best_score = -1
+
+                for db_lt in active_lts:
+                    score = 0.0
+                    if db_lt.domain and db_lt.domain.lower() in desc_lower:
+                        score += 0.35
+                    specs = db_lt.specializations_json or []
+                    matched = sum(1 for s in specs if s.lower() in desc_lower)
+                    score += min(0.3, matched * 0.1)
+                    score += db_lt.performance_score * 0.1
+                    if db_lt.current_task_id:
+                        score -= 0.1
+                    if score > best_score:
+                        best_score = score
+                        best_lt_db = db_lt
+
+                if not best_lt_db:
+                    if active_lts:
+                        best_lt_db = active_lts[0]
+                    else:
+                        wave_task_results.append({
+                            "title": task_data.get("title", ""),
+                            "success": False,
+                            "error": "No lieutenant available",
+                            "quality_score": 0,
+                            "cost_usd": 0,
+                        })
+                        continue
+
+                lt = lt_manager.get_lieutenant(best_lt_db.id)
+                if lt:
+                    task_assignments.append((task_data, lt))
 
             # Execute tasks in parallel within the wave
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -246,9 +276,12 @@ class DirectiveManager:
 
             def _execute_one(task_data_and_lt):
                 td, lt = task_data_and_lt
-                task = TaskInput(title=td.get("title", ""), description=td.get("description", ""))
-                result = lt.execute_task(task)
-                return td, lt, result
+                try:
+                    task = TaskInput(title=td.get("title", ""), description=td.get("description", ""))
+                    result = lt.execute_task(task)
+                    return td, lt, result
+                except Exception:
+                    raise
 
             max_workers = min(get_settings().ace.max_parallel_tasks, len(task_assignments) or 1)
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
