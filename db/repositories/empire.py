@@ -124,9 +124,17 @@ class EmpireRepository(BaseRepository[Empire]):
             select(func.count(KnowledgeEntity.id))
         ).scalar() or 0
 
-        total_cost = self.session.execute(
-            select(func.coalesce(func.sum(Empire.total_cost_usd), 0.0))
-        ).scalar() or 0.0
+        # Pull real cost from BudgetLog (Empire.total_cost_usd is never incremented)
+        total_cost = 0.0
+        try:
+            from db.models import BudgetLog
+            total_cost = float(self.session.execute(
+                select(func.coalesce(func.sum(BudgetLog.cost_usd), 0.0))
+            ).scalar() or 0.0)
+        except Exception:
+            total_cost = float(self.session.execute(
+                select(func.coalesce(func.sum(Empire.total_cost_usd), 0.0))
+            ).scalar() or 0.0)
 
         total_tasks = self.session.execute(
             select(func.coalesce(func.sum(Empire.total_tasks_completed), 0))
