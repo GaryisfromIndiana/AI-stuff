@@ -20,14 +20,14 @@ from flask import Blueprint, render_template, jsonify, request, current_app
 logger = logging.getLogger(__name__)
 god_panel_bp = Blueprint("god_panel", __name__)
 
-# ── Command tracker — stores status/results for async commands ────────
-_command_store: dict[str, dict] = {}
+# ── Command tracker — DB-backed with in-memory cache ─────────────────
+_command_cache: dict[str, dict] = {}
 _command_lock = threading.Lock()
-_MAX_STORED_COMMANDS = 200
+_MAX_CACHED = 200
 
 
 def _track_command(command_id: str, command: str, action: str, topic: str) -> dict:
-    """Register a new command in the tracker."""
+    """Register a new command — persisted to DB, cached in memory."""
     entry = {
         "id": command_id,
         "command": command,
@@ -41,32 +41,120 @@ def _track_command(command_id: str, command: str, action: str, topic: str) -> di
         "cost": 0.0,
     }
     with _command_lock:
-        _command_store[command_id] = entry
-        # Evict oldest if over limit
-        if len(_command_store) > _MAX_STORED_COMMANDS:
-            oldest = sorted(_command_store.keys(), key=lambda k: _command_store[k]["started_at"])
-            for k in oldest[:len(_command_store) - _MAX_STORED_COMMANDS]:
-                del _command_store[k]
+        _command_cache[command_id] = entry
+        if len(_command_cache) > _MAX_CACHED:
+            oldest = sorted(_command_cache.keys(), key=lambda k: _command_cache[k]["started_at"])
+            for k in oldest[:len(_command_cache) - _MAX_CACHED]:
+                del _command_cache[k]
+    _persist_command(entry)
     return entry
 
 
 def _complete_command(command_id: str, result: dict | None = None, error: str | None = None) -> None:
-    """Mark a command as completed."""
+    """Mark a command as completed — updates DB and cache."""
+    now = datetime.now(timezone.utc).isoformat()
+    cost = (result or {}).get("research_cost", 0) or (result or {}).get("cost", 0)
     with _command_lock:
-        if command_id in _command_store:
-            entry = _command_store[command_id]
+        if command_id in _command_cache:
+            entry = _command_cache[command_id]
             entry["status"] = "completed" if not error else "failed"
-            entry["completed_at"] = datetime.now(timezone.utc).isoformat()
+            entry["completed_at"] = now
             entry["result"] = result
             entry["error"] = error
-            entry["cost"] = (result or {}).get("research_cost", 0) or (result or {}).get("cost", 0)
+            entry["cost"] = cost
+    _update_command_db(command_id, "completed" if not error else "failed", now, result, error, cost)
 
 
 def _update_command_status(command_id: str, status: str) -> None:
     """Update command status (e.g. 'running', 'researching')."""
     with _command_lock:
-        if command_id in _command_store:
-            _command_store[command_id]["status"] = status
+        if command_id in _command_cache:
+            _command_cache[command_id]["status"] = status
+    _update_command_db(command_id, status)
+
+
+def _persist_command(entry: dict) -> None:
+    """Write a command to the memory system as an episodic memory."""
+    try:
+        from core.memory.manager import MemoryManager
+        from flask import current_app
+        empire_id = current_app.config.get("EMPIRE_ID", "")
+        mm = MemoryManager(empire_id)
+        mm.store(
+            content=f"God Panel command: {entry['action']} — {entry['topic']}",
+            memory_type="episodic",
+            title=f"cmd:{entry['id']}",
+            category="god_panel_command",
+            importance=0.3,
+            tags=["god_panel", "command", entry["action"].lower()],
+            metadata={"command_id": entry["id"], "action": entry["action"],
+                      "topic": entry["topic"], "status": entry["status"]},
+            source_type="god_panel",
+        )
+    except Exception as e:
+        logger.debug("Failed to persist command to DB: %s", e)
+
+
+def _update_command_db(command_id: str, status: str, completed_at: str | None = None,
+                       result: dict | None = None, error: str | None = None,
+                       cost: float = 0.0) -> None:
+    """Update command status in the DB (via memory metadata)."""
+    try:
+        from db.engine import session_scope
+        from db.models import MemoryEntry
+        from sqlalchemy import select
+        with session_scope() as session:
+            stmt = select(MemoryEntry).where(MemoryEntry.title == f"cmd:{command_id}")
+            entry = session.execute(stmt).scalars().first()
+            if entry:
+                meta = entry.metadata_json or {}
+                meta["status"] = status
+                if completed_at:
+                    meta["completed_at"] = completed_at
+                if error:
+                    meta["error"] = error
+                if cost:
+                    meta["cost"] = cost
+                # Store result summary, not full result (too large)
+                if result and not error:
+                    summary = {k: v for k, v in result.items()
+                              if k in ("status", "research_cost", "topics_researched",
+                                       "discoveries", "proposals", "applied")}
+                    meta["result_summary"] = summary
+                entry.metadata_json = meta
+    except Exception as e:
+        logger.debug("Failed to update command in DB: %s", e)
+
+
+def _load_command_from_db(command_id: str) -> dict | None:
+    """Load a command from DB if not in cache."""
+    try:
+        from db.engine import get_session
+        from db.models import MemoryEntry
+        from sqlalchemy import select
+        session = get_session()
+        try:
+            stmt = select(MemoryEntry).where(MemoryEntry.title == f"cmd:{command_id}")
+            entry = session.execute(stmt).scalars().first()
+            if entry:
+                meta = entry.metadata_json or {}
+                return {
+                    "id": command_id,
+                    "command": meta.get("action", ""),
+                    "action": meta.get("action", ""),
+                    "topic": meta.get("topic", ""),
+                    "status": meta.get("status", "unknown"),
+                    "started_at": entry.created_at.isoformat() if entry.created_at else None,
+                    "completed_at": meta.get("completed_at"),
+                    "result": meta.get("result_summary"),
+                    "error": meta.get("error"),
+                    "cost": meta.get("cost", 0.0),
+                }
+        finally:
+            session.close()
+    except Exception:
+        pass
+    return None
 
 
 @god_panel_bp.route("/")
@@ -195,10 +283,22 @@ def execute_command():
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
     data = request.get_json(silent=True) or {}
-    command = data.get("command", "").strip()
+    raw_command = data.get("command", "").strip()
 
-    if not command:
+    if not raw_command:
         return jsonify({"error": "No command provided"}), 400
+
+    # Extract the actual topic — callers send {"command":"research","args":{"topic":"..."}}
+    # The real content is in args.topic, not in command (which is just "research").
+    args = data.get("args", {})
+    topic_from_args = ""
+    if isinstance(args, dict):
+        topic_from_args = args.get("topic", "") or args.get("description", "")
+
+    # Build the full command text the LLM will classify
+    command = topic_from_args if topic_from_args else raw_command
+    if not command:
+        return jsonify({"error": "No command or topic provided"}), 400
 
     try:
         import json
@@ -450,7 +550,10 @@ def _dispatch_action(
 def command_status(command_id):
     """Poll the status of an async God Panel command."""
     with _command_lock:
-        entry = _command_store.get(command_id)
+        entry = _command_cache.get(command_id)
+    if not entry:
+        # Try loading from DB (survives deploys)
+        entry = _load_command_from_db(command_id)
     if not entry:
         return jsonify({"error": "Command not found"}), 404
     return jsonify(entry)
@@ -459,12 +562,47 @@ def command_status(command_id):
 @god_panel_bp.route("/commands")
 def list_commands():
     """List all tracked God Panel commands (most recent first)."""
+    # Merge in-memory cache with DB records
     with _command_lock:
-        commands = sorted(
-            _command_store.values(),
-            key=lambda c: c["started_at"],
-            reverse=True,
-        )
+        commands = list(_command_cache.values())
+
+    # Also load recent commands from DB that aren't in cache
+    try:
+        from db.engine import get_session
+        from db.models import MemoryEntry
+        from sqlalchemy import select, desc
+        session = get_session()
+        try:
+            stmt = (
+                select(MemoryEntry)
+                .where(MemoryEntry.category == "god_panel_command")
+                .order_by(desc(MemoryEntry.created_at))
+                .limit(100)
+            )
+            db_entries = session.execute(stmt).scalars().all()
+            cached_ids = {c["id"] for c in commands}
+            for entry in db_entries:
+                meta = entry.metadata_json or {}
+                cmd_id = meta.get("command_id", "")
+                if cmd_id and cmd_id not in cached_ids:
+                    commands.append({
+                        "id": cmd_id,
+                        "command": meta.get("action", ""),
+                        "action": meta.get("action", ""),
+                        "topic": meta.get("topic", ""),
+                        "status": meta.get("status", "unknown"),
+                        "started_at": entry.created_at.isoformat() if entry.created_at else None,
+                        "completed_at": meta.get("completed_at"),
+                        "result": meta.get("result_summary"),
+                        "error": meta.get("error"),
+                        "cost": meta.get("cost", 0.0),
+                    })
+        finally:
+            session.close()
+    except Exception:
+        pass
+
+    commands.sort(key=lambda c: c.get("started_at", ""), reverse=True)
     limit = request.args.get("limit", 50, type=int)
     status_filter = request.args.get("status")
     if status_filter:
@@ -765,23 +903,16 @@ def _execute_deep_research(
         result["synthesis"] = final_response.content
         result["research_cost"] += final_response.cost_usd
 
-        # ── 4. Store the compounded knowledge ───────────────────────
+        # ── 4. Store the compounded knowledge (with supersession) ────
         try:
-            from core.memory.manager import MemoryManager
-            mm = MemoryManager(empire_id)
-            mm.store(
+            from core.memory.bitemporal import BiTemporalMemory
+            bt = BiTemporalMemory(empire_id)
+            bt.store_intelligent(
                 content=f"God Panel Research: {topic}\n\n{final_response.content}",
-                memory_type="semantic",
                 title=f"Research: {topic[:60]}",
                 category="god_panel_research",
                 importance=0.85,
                 tags=["god_panel", "research", "synthesis"],
-                source_type="god_panel",
-                metadata={
-                    "topic": topic,
-                    "lieutenants_consulted": [lt["domain"] for lt in lieutenant_insights],
-                    "had_prior_knowledge": bool(prior_knowledge),
-                },
             )
         except Exception as e:
             logger.debug("Failed to store God Panel research memory: %s", e)
