@@ -171,21 +171,17 @@ def create_app(config: dict | None = None) -> Flask:
         logger.error("Server error: %s", e)
         return {"error": "Internal server error"}, 500
 
-    # Start scheduler daemon in every worker. The advisory lock in tick()
-    # ensures only one worker runs jobs per tick (on Postgres). On SQLite
-    # it's fine — only one process runs anyway.
-    import os
-    is_worker = os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG")
-    if is_worker:
-        try:
-            from core.scheduler.daemon import SchedulerDaemon
-            empire_id = app.config.get("EMPIRE_ID", "")
-            daemon = SchedulerDaemon(empire_id, tick_interval=100)  # 100s ticks
-            app.config["_SCHEDULER_DAEMON"] = daemon
-            daemon.start()
-            logger.info("Scheduler daemon STARTED (5 min ticks, %d jobs)", len(daemon._jobs))
-        except Exception as e:
-            logger.warning("Could not create scheduler: %s", e)
+    # Always start the scheduler daemon. The thread is daemonic so if
+    # Flask's reloader restarts the process the old thread dies with it.
+    try:
+        from core.scheduler.daemon import SchedulerDaemon
+        empire_id = app.config.get("EMPIRE_ID", "")
+        daemon = SchedulerDaemon(empire_id, tick_interval=100)  # 100s ticks
+        app.config["_SCHEDULER_DAEMON"] = daemon
+        daemon.start()
+        logger.info("Scheduler daemon STARTED (100s ticks, %d jobs)", len(daemon._jobs))
+    except Exception:
+        logger.exception("SCHEDULER FAILED TO START")
 
     logger.info("Empire web app created: %s", settings.empire_name)
     return app
