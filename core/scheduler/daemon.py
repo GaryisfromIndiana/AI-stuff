@@ -938,13 +938,14 @@ class SchedulerDaemon:
         """
         from db.engine import get_session
         from db.models import MemoryEntry, KnowledgeEntity
-        from sqlalchemy import select, and_
+        from sqlalchemy import select, and_, or_, cast, String
         from core.memory.embeddings import generate_embeddings_batch
 
         batch_size = 50
         total_filled = 0
 
         # 1. Backfill memory entries (semantic/experiential/design only)
+        # Match both SQL NULL and JSON null (stored as 'null' text in JSON columns)
         session = None
         try:
             session = get_session()
@@ -952,7 +953,11 @@ class SchedulerDaemon:
                 select(MemoryEntry)
                 .where(and_(
                     MemoryEntry.empire_id == self.empire_id,
-                    MemoryEntry.embedding_json.is_(None),
+                    or_(
+                        MemoryEntry.embedding_json.is_(None),
+                        cast(MemoryEntry.embedding_json, String) == "null",
+                        cast(MemoryEntry.embedding_json, String) == "",
+                    ),
                     MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]),
                 ))
                 .order_by(MemoryEntry.effective_importance.desc())
@@ -1011,7 +1016,11 @@ class SchedulerDaemon:
                 select(KnowledgeEntity)
                 .where(and_(
                     KnowledgeEntity.empire_id == self.empire_id,
-                    KnowledgeEntity.embedding_json.is_(None),
+                    or_(
+                        KnowledgeEntity.embedding_json.is_(None),
+                        cast(KnowledgeEntity.embedding_json, String) == "null",
+                        cast(KnowledgeEntity.embedding_json, String) == "",
+                    ),
                 ))
                 .order_by(KnowledgeEntity.importance_score.desc())
                 .limit(batch_size)
