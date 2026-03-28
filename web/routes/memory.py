@@ -244,8 +244,18 @@ def qdrant_debug():
             )
         ).scalar() or 0
 
-        # Try fetching one to inspect
+        # Try fetching a semantic/experiential/design one to inspect
         sample = session.execute(
+            select(MemoryEntry).where(
+                and_(
+                    MemoryEntry.embedding_json.is_not(None),
+                    MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]),
+                )
+            ).limit(1)
+        ).scalars().first()
+
+        # Also try without type filter
+        sample_any = session.execute(
             select(MemoryEntry).where(
                 MemoryEntry.embedding_json.is_not(None),
             ).limit(1)
@@ -261,6 +271,20 @@ def qdrant_debug():
                 "embedding_type": type(emb).__name__,
                 "embedding_len": len(emb) if isinstance(emb, (list, str)) else 0,
                 "embedding_preview": str(emb)[:100] if emb else None,
+                "is_truthy": bool(emb),
+            }
+
+        sample_any_info = None
+        if sample_any:
+            emb2 = sample_any.embedding_json
+            sample_any_info = {
+                "id": sample_any.id,
+                "empire_id": sample_any.empire_id,
+                "type": sample_any.memory_type,
+                "embedding_type": type(emb2).__name__,
+                "embedding_len": len(emb2) if isinstance(emb2, (list, str)) else 0,
+                "embedding_preview": str(emb2)[:100] if emb2 else None,
+                "is_truthy": bool(emb2),
             }
 
         ent_with = session.execute(
@@ -272,7 +296,8 @@ def qdrant_debug():
         result = {
             "memories_with_embedding": mem_with,
             "entities_with_embedding": ent_with,
-            "sample_memory": sample_info,
+            "sample_typed": sample_info,
+            "sample_any": sample_any_info,
         }
 
     return jsonify(result)
