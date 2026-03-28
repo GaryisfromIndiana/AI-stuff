@@ -511,7 +511,7 @@ Call tools when you need real data — don't guess or hallucinate facts.
                 response = client.complete_with_tools(
                     request,
                     tool_executor=self._tool_registry.execute_tool_call,
-                    max_rounds=5,
+                    max_rounds=8,
                 )
             else:
                 response = client.complete(request)
