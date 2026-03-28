@@ -271,6 +271,7 @@ class LLMClient(ABC):
         """
         messages = list(request.messages)
         final_response = None
+        tool_rounds = 0
 
         for round_num in range(max_rounds):
             req = LLMRequest(
@@ -298,6 +299,8 @@ class LLMClient(ABC):
             if not response.has_tool_calls or tool_executor is None:
                 break
 
+            tool_rounds += 1
+
             # Add assistant message with tool calls
             messages.append(LLMMessage.assistant(
                 response.content,
@@ -318,16 +321,30 @@ class LLMClient(ABC):
                     logger.error("Tool %s error: %s", tc.name, e)
                     messages.append(LLMMessage.tool_result(tc.id, f"Error: {e}", tc.name))
 
-        # If the last response still had tool calls (hit max_rounds or loop
-        # ended with pending tool results), make one final call WITHOUT tools
-        # to force the LLM to produce a text summary of everything gathered.
-        if final_response and final_response.has_tool_calls:
+        # After multiple tool rounds, the LLM's "final" response may be a
+        # brief or incomplete answer rather than a true synthesis.  Force a
+        # dedicated synthesis call whenever more than one tool round ran —
+        # not only when the loop hit max_rounds with pending tool calls.
+        needs_synthesis = (
+            final_response is not None
+            and tool_rounds > 1
+        )
+        if needs_synthesis or (final_response and final_response.has_tool_calls):
+            reason = (
+                "pending tool calls"
+                if final_response and final_response.has_tool_calls
+                else f"{tool_rounds} tool rounds"
+            )
             logger.info(
-                "Tool loop ended after %d rounds with pending tool calls — requesting final summary (messages=%d)",
-                max_rounds, len(messages),
+                "Tool loop ended (%s) — requesting final summary (messages=%d)",
+                reason, len(messages),
             )
             try:
-                # Add instruction to summarize without tools
+                # Append the last assistant text so the LLM sees its own
+                # most-recent answer in context before synthesizing.
+                if final_response and not final_response.has_tool_calls and final_response.content:
+                    messages.append(LLMMessage.assistant(final_response.content))
+
                 messages.append(LLMMessage.user(
                     "Now synthesize all the information gathered from the tool calls above "
                     "into a comprehensive, well-structured response. Do not attempt to call "
