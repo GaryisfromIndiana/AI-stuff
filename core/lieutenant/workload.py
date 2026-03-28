@@ -72,6 +72,7 @@ class WorkloadBalancer:
 
     def get_workload_state(self) -> list[WorkloadState]:
         """Get current workload state for all lieutenants."""
+        session = None
         try:
             from db.engine import get_session
             from db.repositories.lieutenant import LieutenantRepository
@@ -118,6 +119,9 @@ class WorkloadBalancer:
         except Exception as e:
             logger.error("Failed to get workload state: %s", e)
             return []
+        finally:
+            if session is not None:
+                session.close()
 
     def get_workload_report(self) -> WorkloadReport:
         """Get a comprehensive workload report."""

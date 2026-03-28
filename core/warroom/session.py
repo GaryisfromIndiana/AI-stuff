@@ -88,13 +88,6 @@ class WarRoomSession:
         self.synthesis: dict = {}
         self._start_time = time.time()
         self._total_cost = 0.0
-        self._repo = None
-
-    def _get_repo(self):
-        """Get a fresh session."""
-        from db.engine import get_session
-        return get_session()
-
     def add_participant(self, lieutenant_id: str, name: str = "", domain: str = "") -> None:
         """Add a lieutenant participant."""
         self.participants.append({

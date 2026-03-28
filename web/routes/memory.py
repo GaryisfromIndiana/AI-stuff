@@ -67,31 +67,43 @@ def memories_by_lieutenant(lieutenant_id: str):
 @memory_bp.route("/decay", methods=["POST"])
 def run_decay():
     """Manually trigger memory decay."""
-    empire_id = current_app.config.get("EMPIRE_ID", "")
-    from core.memory.manager import MemoryManager
-    mm = MemoryManager(empire_id)
-    decayed = mm.decay()
-    return jsonify({"decayed": decayed})
+    try:
+        empire_id = current_app.config.get("EMPIRE_ID", "")
+        from core.memory.manager import MemoryManager
+        mm = MemoryManager(empire_id)
+        decayed = mm.decay()
+        return jsonify({"decayed": decayed})
+    except Exception as e:
+        logger.error("Memory decay error: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 
 @memory_bp.route("/cleanup", methods=["POST"])
 def run_cleanup():
     """Manually trigger memory cleanup."""
-    empire_id = current_app.config.get("EMPIRE_ID", "")
-    from core.memory.manager import MemoryManager
-    mm = MemoryManager(empire_id)
-    result = mm.cleanup()
-    return jsonify(result)
+    try:
+        empire_id = current_app.config.get("EMPIRE_ID", "")
+        from core.memory.manager import MemoryManager
+        mm = MemoryManager(empire_id)
+        result = mm.cleanup()
+        return jsonify(result)
+    except Exception as e:
+        logger.error("Memory cleanup error: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 
 @memory_bp.route("/consolidate", methods=["POST"])
 def run_consolidate():
     """Manually trigger memory consolidation."""
-    empire_id = current_app.config.get("EMPIRE_ID", "")
-    from core.memory.manager import MemoryManager
-    mm = MemoryManager(empire_id)
-    promoted = mm.consolidate()
-    return jsonify({"promoted": promoted})
+    try:
+        empire_id = current_app.config.get("EMPIRE_ID", "")
+        from core.memory.manager import MemoryManager
+        mm = MemoryManager(empire_id)
+        promoted = mm.consolidate()
+        return jsonify({"promoted": promoted})
+    except Exception as e:
+        logger.error("Memory consolidation error: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 
 @memory_bp.route("/repair", methods=["POST"])

@@ -387,32 +387,39 @@ class SchedulerDaemon:
             jobs = sorted(self._jobs.values(), key=lambda j: j.priority)
 
         for job in jobs:
-            if not job.enabled:
-                continue
+            with self._lock:
+                if not job.enabled:
+                    continue
 
-            # Check if job is due
-            if job.last_run is None or (now - job.last_run).total_seconds() >= job.interval_seconds:
-                try:
-                    start = time.time()
-                    result = job.handler()
-                    duration_ms = (time.time() - start) * 1000
+                # Check if job is due
+                if job.last_run is not None and (now - job.last_run).total_seconds() < job.interval_seconds:
+                    continue
 
+            # Run handler WITHOUT lock (can be slow)
+            try:
+                start = time.time()
+                result = job.handler()
+                duration_ms = (time.time() - start) * 1000
+
+                with self._lock:
                     job.last_run = now
                     job.run_count += 1
                     job.consecutive_errors = 0
                     job.avg_duration_ms = (job.avg_duration_ms * 0.9 + duration_ms * 0.1) if job.avg_duration_ms else duration_ms
                     self._total_job_runs += 1
-                    executed.append(job.name)
+                executed.append(job.name)
 
-                    logger.debug("Job %s completed in %.1fms", job.name, duration_ms)
+                logger.debug("Job %s completed in %.1fms", job.name, duration_ms)
 
-                except Exception as e:
+            except Exception as e:
+                with self._lock:
                     job.error_count += 1
                     job.consecutive_errors += 1
                     job.last_error = str(e)
                     self._total_errors += 1
-                    logger.error("Job %s failed: %s", job.name, e)
+                logger.error("Job %s failed: %s", job.name, e)
 
+                with self._lock:
                     # Disable job after 20 consecutive errors (auto-re-enables after 10 ticks)
                     if job.consecutive_errors >= 20:
                         job.enabled = False
@@ -420,16 +427,16 @@ class SchedulerDaemon:
                         job.metadata_json["disabled_at_tick"] = self._tick_count
                         logger.warning("Job %s disabled after %d consecutive errors", job.name, job.consecutive_errors)
 
-            # Auto-re-enable disabled jobs after 10 ticks (~50 min)
-            with self._lock:
-                for job in self._jobs.values():
-                    if not job.enabled:
-                        meta = getattr(job, "metadata_json", None) or {}
-                        disabled_at = meta.get("disabled_at_tick", 0)
-                        if self._tick_count - disabled_at >= 10:
-                            job.enabled = True
-                            job.consecutive_errors = 0
-                            logger.info("Job %s auto-re-enabled after cooldown", job.name)
+        # Auto-re-enable disabled jobs after 10 ticks (~50 min)
+        with self._lock:
+            for job in self._jobs.values():
+                if not job.enabled:
+                    meta = getattr(job, "metadata_json", None) or {}
+                    disabled_at = meta.get("disabled_at_tick", 0)
+                    if self._tick_count - disabled_at >= 10:
+                        job.enabled = True
+                        job.consecutive_errors = 0
+                        logger.info("Job %s auto-re-enabled after cooldown", job.name)
 
         return executed
 

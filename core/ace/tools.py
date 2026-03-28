@@ -479,7 +479,7 @@ class ToolRegistry:
             desc = getattr(e, 'description', '') or ''
             part = f"**{name}** ({etype}): {desc[:200]}"
             if include_neighbors:
-                neighbors = graph.get_neighbors(e.name, max_depth=1)
+                neighbors = graph.get_neighbors(name, max_depth=1)
                 if neighbors:
                     neighbor_names = [n.name for n in neighbors[:5]]
                     part += f"\n  Related: {', '.join(neighbor_names)}"

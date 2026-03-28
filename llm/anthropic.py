@@ -207,18 +207,21 @@ class AnthropicClient(LLMClient):
 
                 # Record usage from the final message
                 final = stream.get_final_message()
-                if final:
+                if final and final.usage:
                     tokens_in = final.usage.input_tokens
                     tokens_out = final.usage.output_tokens
-                    cost = self._calculate_cost(model, tokens_in, tokens_out)
-                    self._record_usage(LLMResponse(
-                        content="",
-                        model=model,
-                        provider="anthropic",
-                        tokens_input=tokens_in,
-                        tokens_output=tokens_out,
-                        cost_usd=cost,
-                    ))
+                else:
+                    tokens_in = 0
+                    tokens_out = 0
+                cost = self._calculate_cost(model, tokens_in, tokens_out)
+                self._record_usage(LLMResponse(
+                    content="",
+                    model=model,
+                    provider="anthropic",
+                    tokens_input=tokens_in,
+                    tokens_output=tokens_out,
+                    cost_usd=cost,
+                ))
 
         except Exception as e:
             self._errors += 1

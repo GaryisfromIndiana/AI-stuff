@@ -357,10 +357,18 @@ class LieutenantManager:
         try:
             summary = repo.get_fleet_summary(self.empire_id)
 
+            # Count lieutenants per domain
+            db_lts = repo.get_by_empire(self.empire_id)
+            by_domain: dict[str, int] = {}
+            for lt in db_lts:
+                domain = lt.domain or "unknown"
+                by_domain[domain] = by_domain.get(domain, 0) + 1
+
             return FleetStats(
                 total=summary.get("total_lieutenants", 0),
                 active=summary.get("by_status", {}).get("active", 0),
                 inactive=summary.get("by_status", {}).get("inactive", 0),
+                by_domain=by_domain,
                 total_tasks=summary.get("total_tasks_completed", 0) + summary.get("total_tasks_failed", 0),
                 avg_performance=summary.get("avg_performance", 0),
                 total_cost=summary.get("total_cost_usd", 0),
