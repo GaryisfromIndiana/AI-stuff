@@ -118,7 +118,7 @@ class VectorStore:
             self._enabled = False
 
     def _ensure_collection(self, name: str, hnsw: Any, on_disk: bool) -> None:
-        """Create a collection if it doesn't exist."""
+        """Create a collection if it doesn't exist, and ensure payload indexes."""
         try:
             self._client.get_collection(name)
         except Exception:
@@ -132,6 +132,18 @@ class VectorStore:
                 hnsw_config=hnsw,
             )
             logger.info("Created Qdrant collection: %s", name)
+
+        # Ensure payload indexes exist for filtered search
+        from qdrant_client.models import PayloadSchemaType
+        for field in ["empire_id", "lieutenant_id", "memory_type", "entity_type"]:
+            try:
+                self._client.create_payload_index(
+                    collection_name=name,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+            except Exception:
+                pass  # Index already exists
 
     @property
     def enabled(self) -> bool:
@@ -243,9 +255,9 @@ class VectorStore:
                     FieldCondition(key="memory_type", match=MatchAny(any=memory_types))
                 )
 
-            results = self._client.search(
+            response = self._client.query_points(
                 collection_name=self._collection_memories,
-                query_vector=embedding,
+                query=embedding,
                 query_filter=Filter(must=must_conditions),
                 limit=limit,
                 score_threshold=min_score,
@@ -257,7 +269,7 @@ class VectorStore:
                     "score": hit.score,
                     "memory_type": hit.payload.get("memory_type", ""),
                 }
-                for hit in results
+                for hit in response.points
             ]
         except Exception as e:
             logger.error("Qdrant memory search failed: %s", e)
@@ -372,9 +384,9 @@ class VectorStore:
                     FieldCondition(key="entity_type", match=MatchValue(value=entity_type))
                 )
 
-            results = self._client.search(
+            response = self._client.query_points(
                 collection_name=self._collection_entities,
-                query_vector=embedding,
+                query=embedding,
                 query_filter=Filter(must=must_conditions),
                 limit=limit,
                 score_threshold=min_score,
@@ -387,7 +399,7 @@ class VectorStore:
                     "name": hit.payload.get("name", ""),
                     "entity_type": hit.payload.get("entity_type", ""),
                 }
-                for hit in results
+                for hit in response.points
             ]
         except Exception as e:
             logger.error("Qdrant entity search failed: %s", e)
