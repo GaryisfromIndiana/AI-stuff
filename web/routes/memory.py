@@ -92,3 +92,37 @@ def run_consolidate():
     mm = MemoryManager(empire_id)
     promoted = mm.consolidate()
     return jsonify({"promoted": promoted})
+
+
+@memory_bp.route("/repair", methods=["POST"])
+def repair_decay():
+    """One-shot repair: restore wrongly-decayed knowledge memories to full strength.
+
+    Semantic, experiential, and design memories should not time-decay
+    (only supersession removes them). This resets their decay_factor to 1.0
+    unless they've been explicitly superseded.
+    """
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from db.engine import session_scope
+    from db.models import MemoryEntry
+    from sqlalchemy import select
+
+    restored = 0
+    by_type = {"semantic": 0, "experiential": 0, "design": 0}
+
+    with session_scope() as session:
+        entries = list(session.execute(
+            select(MemoryEntry).where(MemoryEntry.empire_id == empire_id)
+        ).scalars().all())
+
+        for m in entries:
+            if m.memory_type in ("semantic", "experiential", "design"):
+                meta = m.metadata_json or {}
+                is_superseded = isinstance(meta, dict) and meta.get("superseded_at")
+                if not is_superseded and m.decay_factor < 1.0:
+                    m.decay_factor = 1.0
+                    m.effective_importance = m.importance_score * 1.0
+                    by_type[m.memory_type] += 1
+                    restored += 1
+
+    return jsonify({"restored": restored, "by_type": by_type})
