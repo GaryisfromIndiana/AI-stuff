@@ -29,6 +29,7 @@ class JobConfig:
     consecutive_errors: int = 0
     last_error: str = ""
     avg_duration_ms: float = 0.0
+    metadata_json: dict = field(default_factory=dict)
 
 
 @dataclass

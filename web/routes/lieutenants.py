@@ -52,7 +52,7 @@ def lieutenant_detail(lieutenant_id: str):
 
             lt = repo.get(lieutenant_id)
             if not lt:
-                return "Lieutenant not found", 404
+                return jsonify({"error": "Lieutenant not found"}), 404
 
             task_stats = repo.get_task_stats(lieutenant_id)
             cost_breakdown = repo.get_cost_breakdown(lieutenant_id)
@@ -76,7 +76,7 @@ def lieutenant_detail(lieutenant_id: str):
             session.close()
     except Exception as e:
         logger.error("Lieutenant detail error: %s", e)
-        return str(e), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @lieutenants_bp.route("/create", methods=["POST"])

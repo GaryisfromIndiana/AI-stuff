@@ -286,9 +286,6 @@ def execute_command():
     data = request.get_json(silent=True) or {}
     raw_command = data.get("command", "").strip()
 
-    if not raw_command:
-        return jsonify({"error": "No command provided"}), 400
-
     # Extract the actual topic — callers send {"command":"research","args":{"topic":"..."}}
     # The real content is in args.topic, not in command (which is just "research").
     args = data.get("args", {})
@@ -637,6 +634,7 @@ def _execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
         "open_source": "Open weight model releases, HuggingFace trends, local inference",
     }
 
+    round_num = 0
     for round_num in range(1, rounds + 1):
         # Budget check each round
         bm = BudgetManager(empire_id)

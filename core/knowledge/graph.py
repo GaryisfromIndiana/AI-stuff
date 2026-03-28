@@ -565,7 +565,7 @@ class KnowledgeGraph:
 
         repo = self._get_repo()
         try:
-            from sqlalchemy import select
+            from sqlalchemy import select, and_
             from sqlalchemy.orm import joinedload
             from db.models import KnowledgeEntity
 

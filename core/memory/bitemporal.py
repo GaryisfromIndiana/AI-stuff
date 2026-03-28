@@ -303,7 +303,7 @@ class BiTemporalMemory:
                 continue
 
             # Filter confidence
-            if mem.get("importance", 0) < tq.min_confidence:
+            if mem.get("confidence", 0) < tq.min_confidence:
                 continue
 
             facts.append(TemporalFact(
@@ -447,6 +447,10 @@ class BiTemporalMemory:
         if old:
             title = title or old[0].get("title", "")
             category = category or old[0].get("category", "")
+
+        # Mark the old version as superseded
+        now = datetime.now(timezone.utc).isoformat()
+        self._mark_superseded(old_fact_id, now)
 
         return self.store_fact(
             content=new_content,

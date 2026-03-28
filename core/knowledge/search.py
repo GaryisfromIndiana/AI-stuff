@@ -67,6 +67,13 @@ class KnowledgeSearchEngine:
         from db.repositories.knowledge import KnowledgeRepository
         return KnowledgeRepository(get_session())
 
+    def _close_repo(self, repo) -> None:
+        """Close the session owned by a repository."""
+        try:
+            repo.session.close()
+        except Exception:
+            pass
+
     def text_search(
         self,
         query: str,
@@ -89,37 +96,40 @@ class KnowledgeSearchEngine:
         start = time.time()
 
         repo = self._get_repo()
-        entities = repo.search_entities(query, self.empire_id, entity_type or None, limit)
+        try:
+            entities = repo.search_entities(query, self.empire_id, entity_type or None, limit)
 
-        results = []
-        for entity in entities:
-            if entity.confidence < min_confidence:
-                continue
+            results = []
+            for entity in entities:
+                if entity.confidence < min_confidence:
+                    continue
 
-            # Calculate relevance
-            relevance = self._text_relevance(query, entity.name, entity.description)
+                # Calculate relevance
+                relevance = self._text_relevance(query, entity.name, entity.description)
 
-            results.append(SearchResult(
-                entity_id=entity.id,
-                name=entity.name,
-                entity_type=entity.entity_type,
-                description=entity.description,
-                confidence=entity.confidence,
-                relevance_score=relevance,
-                match_type="text",
-                snippet=self._generate_snippet(entity.description, query),
-            ))
+                results.append(SearchResult(
+                    entity_id=entity.id,
+                    name=entity.name,
+                    entity_type=entity.entity_type,
+                    description=entity.description,
+                    confidence=entity.confidence,
+                    relevance_score=relevance,
+                    match_type="text",
+                    snippet=self._generate_snippet(entity.description, query),
+                ))
 
-        # Sort by relevance
-        results.sort(key=lambda r: r.relevance_score, reverse=True)
+            # Sort by relevance
+            results.sort(key=lambda r: r.relevance_score, reverse=True)
 
-        return SearchResponse(
-            query=query,
-            results=results[:limit],
-            total_found=len(results),
-            search_time_ms=(time.time() - start) * 1000,
-            search_type="text",
-        )
+            return SearchResponse(
+                query=query,
+                results=results[:limit],
+                total_found=len(results),
+                search_time_ms=(time.time() - start) * 1000,
+                search_type="text",
+            )
+        finally:
+            self._close_repo(repo)
 
     def semantic_search(
         self,
@@ -146,34 +156,37 @@ class KnowledgeSearchEngine:
             return self.text_search(query, limit=limit)  # Fallback to text search
 
         repo = self._get_repo()
-        similar = repo.similarity_search(
-            embedding=embedding,
-            empire_id=self.empire_id,
-            limit=limit,
-            min_similarity=min_similarity,
-        )
-
-        results = [
-            SearchResult(
-                entity_id=item["entity"].id,
-                name=item["entity"].name,
-                entity_type=item["entity"].entity_type,
-                description=item["entity"].description,
-                confidence=item["entity"].confidence,
-                relevance_score=item["similarity"],
-                match_type="semantic",
-                snippet=item["entity"].description[:200],
+        try:
+            similar = repo.similarity_search(
+                embedding=embedding,
+                empire_id=self.empire_id,
+                limit=limit,
+                min_similarity=min_similarity,
             )
-            for item in similar
-        ]
 
-        return SearchResponse(
-            query=query,
-            results=results,
-            total_found=len(results),
-            search_time_ms=(time.time() - start) * 1000,
-            search_type="semantic",
-        )
+            results = [
+                SearchResult(
+                    entity_id=item["entity"].id,
+                    name=item["entity"].name,
+                    entity_type=item["entity"].entity_type,
+                    description=item["entity"].description,
+                    confidence=item["entity"].confidence,
+                    relevance_score=item["similarity"],
+                    match_type="semantic",
+                    snippet=item["entity"].description[:200],
+                )
+                for item in similar
+            ]
+
+            return SearchResponse(
+                query=query,
+                results=results,
+                total_found=len(results),
+                search_time_ms=(time.time() - start) * 1000,
+                search_type="semantic",
+            )
+        finally:
+            self._close_repo(repo)
 
     def hybrid_search(
         self,
@@ -291,8 +304,11 @@ class KnowledgeSearchEngine:
             List of suggestion strings.
         """
         repo = self._get_repo()
-        entities = repo.search_entities(query, self.empire_id, limit=limit)
-        return [e.name for e in entities]
+        try:
+            entities = repo.search_entities(query, self.empire_id, limit=limit)
+            return [e.name for e in entities]
+        finally:
+            self._close_repo(repo)
 
     def find_related(self, entity_name: str, limit: int = 10) -> list[SearchResult]:
         """Find entities related to a given entity.
@@ -305,25 +321,28 @@ class KnowledgeSearchEngine:
             List of related entity results.
         """
         repo = self._get_repo()
-        entity = repo.get_by_name(entity_name, self.empire_id)
+        try:
+            entity = repo.get_by_name(entity_name, self.empire_id)
 
-        if not entity:
-            return []
+            if not entity:
+                return []
 
-        neighbors = repo.get_neighbors(entity.id, max_depth=2)
+            neighbors = repo.get_neighbors(entity.id, max_depth=2)
 
-        return [
-            SearchResult(
-                entity_id=n["entity"].id,
-                name=n["entity"].name,
-                entity_type=n["entity"].entity_type,
-                description=n["entity"].description,
-                confidence=n["entity"].confidence,
-                relevance_score=1.0 / n["depth"],
-                match_type="relation",
-            )
-            for n in neighbors[:limit]
-        ]
+            return [
+                SearchResult(
+                    entity_id=n["entity"].id,
+                    name=n["entity"].name,
+                    entity_type=n["entity"].entity_type,
+                    description=n["entity"].description,
+                    confidence=n["entity"].confidence,
+                    relevance_score=1.0 / max(n["depth"], 1),
+                    match_type="relation",
+                )
+                for n in neighbors[:limit]
+            ]
+        finally:
+            self._close_repo(repo)
 
     def _text_relevance(self, query: str, name: str, description: str) -> float:
         """Calculate text relevance score."""

@@ -53,7 +53,15 @@ class MemoryConsolidator:
         self._repo = None
 
     def _get_repo(self):
-        """Get a fresh repository with its own session."""
+        """Get a fresh repository with its own session.
+
+        Callers MUST close the session when done, e.g.:
+            repo = self._get_repo()
+            try:
+                ...
+            finally:
+                repo.session.close()
+        """
         from db.engine import get_session
         from db.repositories.memory import MemoryRepository
         return MemoryRepository(get_session())
@@ -100,32 +108,35 @@ class MemoryConsolidator:
         Uses title and content similarity to identify duplicates.
         """
         repo = self._get_repo()
-        memories = repo.get_most_important(
-            empire_id=self.empire_id,
-            lieutenant_id=lieutenant_id or None,
-            limit=200,
-        )
+        try:
+            memories = repo.get_most_important(
+                empire_id=self.empire_id,
+                lieutenant_id=lieutenant_id or None,
+                limit=200,
+            )
 
-        # Group by similar titles
-        groups: dict[str, list] = {}
-        for memory in memories:
-            key = (memory.title or "").lower().strip()[:50]
-            if key and len(key) > 5:
-                if key not in groups:
-                    groups[key] = []
-                groups[key].append(memory)
+            # Group by similar titles
+            groups: dict[str, list] = {}
+            for memory in memories:
+                key = (memory.title or "").lower().strip()[:50]
+                if key and len(key) > 5:
+                    if key not in groups:
+                        groups[key] = []
+                    groups[key].append(memory)
 
-        duplicates = []
-        for key, group_memories in groups.items():
-            if len(group_memories) > 1:
-                duplicates.append(DuplicateGroup(
-                    memory_ids=[m.id for m in group_memories],
-                    titles=[m.title or "" for m in group_memories],
-                    similarity=0.9,
-                    suggested_merge_content=group_memories[0].content or "",
-                ))
+            duplicates = []
+            for key, group_memories in groups.items():
+                if len(group_memories) > 1:
+                    duplicates.append(DuplicateGroup(
+                        memory_ids=[m.id for m in group_memories],
+                        titles=[m.title or "" for m in group_memories],
+                        similarity=0.9,
+                        suggested_merge_content=group_memories[0].content or "",
+                    ))
 
-        return duplicates
+            return duplicates
+        finally:
+            repo.session.close()
 
     def merge_duplicate_group(self, group: DuplicateGroup) -> bool:
         """Merge a group of duplicate memories.
@@ -136,84 +147,93 @@ class MemoryConsolidator:
             return False
 
         repo = self._get_repo()
-        memories = repo.get_many(group.memory_ids)
+        try:
+            memories = repo.get_many(group.memory_ids)
 
-        if len(memories) < 2:
-            return False
+            if len(memories) < 2:
+                return False
 
-        # Keep the one with highest effective importance
-        primary = max(memories, key=lambda m: m.effective_importance)
-        others = [m for m in memories if m.id != primary.id]
+            # Keep the one with highest effective importance
+            primary = max(memories, key=lambda m: m.effective_importance)
+            others = [m for m in memories if m.id != primary.id]
 
-        # Absorb access counts
-        for other in others:
-            primary.access_count += other.access_count
+            # Absorb access counts
+            for other in others:
+                primary.access_count += other.access_count
 
-        # Boost importance slightly
-        primary.importance_score = min(1.0, primary.importance_score * 1.05)
-        primary.effective_importance = primary.importance_score * primary.decay_factor
+            # Boost importance slightly
+            primary.importance_score = min(1.0, primary.importance_score * 1.05)
+            primary.effective_importance = primary.importance_score * primary.decay_factor
 
-        # Delete duplicates
-        for other in others:
-            repo.delete(other.id)
+            # Delete duplicates
+            for other in others:
+                repo.delete(other.id)
 
-        repo.flush()
-        repo.commit()
-        return True
+            repo.flush()
+            repo.commit()
+            return True
+        finally:
+            repo.session.close()
 
     def find_promotion_candidates(self, lieutenant_id: str = "") -> list[PromotionCandidate]:
         """Find memories that should be promoted to a higher tier."""
         repo = self._get_repo()
-        candidates = repo.get_promotion_candidates(
-            empire_id=self.empire_id,
-            min_importance=0.65,
-            min_access_count=1,
-        )
+        try:
+            candidates = repo.get_promotion_candidates(
+                empire_id=self.empire_id,
+                min_importance=0.65,
+                min_access_count=1,
+            )
 
-        promotions = []
-        for memory in candidates:
-            if lieutenant_id and memory.lieutenant_id != lieutenant_id:
-                continue
+            promotions = []
+            for memory in candidates:
+                if lieutenant_id and memory.lieutenant_id != lieutenant_id:
+                    continue
 
-            promotions.append(PromotionCandidate(
-                memory_id=memory.id,
-                current_type=memory.memory_type,
-                suggested_type="experiential" if memory.memory_type == "episodic" else "semantic",
-                reason=f"High importance ({memory.importance_score:.2f}) and access count ({memory.access_count})",
-                importance=memory.importance_score,
-            ))
+                promotions.append(PromotionCandidate(
+                    memory_id=memory.id,
+                    current_type=memory.memory_type,
+                    suggested_type="experiential" if memory.memory_type == "episodic" else "semantic",
+                    reason=f"High importance ({memory.importance_score:.2f}) and access count ({memory.access_count})",
+                    importance=memory.importance_score,
+                ))
 
-        return promotions
+            return promotions
+        finally:
+            repo.session.close()
 
     def promote_memory(self, candidate: PromotionCandidate) -> bool:
         """Promote a memory to a higher tier."""
         repo = self._get_repo()
-        memory = repo.get(candidate.memory_id)
+        try:
+            memory = repo.get(candidate.memory_id)
 
-        if not memory:
-            return False
+            if not memory:
+                return False
 
-        from core.memory.manager import MemoryManager
-        mm = MemoryManager(self.empire_id)
+            from core.memory.manager import MemoryManager
+            mm = MemoryManager(self.empire_id)
 
-        # Create promoted memory
-        mm.store(
-            content=f"[Promoted from {candidate.current_type}] {memory.content}",
-            memory_type=candidate.suggested_type,
-            lieutenant_id=memory.lieutenant_id or "",
-            title=f"Promoted: {memory.title}" if memory.title else "Promoted memory",
-            category=memory.category,
-            importance=memory.importance_score * 1.1,
-            tags=(memory.tags_json or []) + ["promoted"],
-            source_type="promotion",
-            metadata={"promoted_from": candidate.memory_id},
-        )
+            # Create promoted memory
+            mm.store(
+                content=f"[Promoted from {candidate.current_type}] {memory.content}",
+                memory_type=candidate.suggested_type,
+                lieutenant_id=memory.lieutenant_id or "",
+                title=f"Promoted: {memory.title}" if memory.title else "Promoted memory",
+                category=memory.category,
+                importance=memory.importance_score * 1.1,
+                tags=(memory.tags_json or []) + ["promoted"],
+                source_type="promotion",
+                metadata={"promoted_from": candidate.memory_id},
+            )
 
-        # Mark original as promoted
-        repo.mark_promoted(candidate.memory_id, candidate.suggested_type)
-        repo.commit()
+            # Mark original as promoted
+            repo.mark_promoted(candidate.memory_id, candidate.suggested_type)
+            repo.commit()
 
-        return True
+            return True
+        finally:
+            repo.session.close()
 
     def summarize_old_episodes(self, lieutenant_id: str = "", days: int = 14) -> int:
         """Summarize clusters of old episodic memories.
@@ -222,55 +242,57 @@ class MemoryConsolidator:
         and archive the originals.
         """
         repo = self._get_repo()
+        try:
+            # Get old episodic memories
+            from datetime import datetime, timezone, timedelta
+            from sqlalchemy import select, and_
+            from db.models import MemoryEntry
 
-        # Get old episodic memories
-        from datetime import datetime, timezone, timedelta
-        from sqlalchemy import select, and_
-        from db.models import MemoryEntry
+            threshold = datetime.now(timezone.utc) - timedelta(days=days)
+            stmt = (
+                select(MemoryEntry)
+                .where(and_(
+                    MemoryEntry.empire_id == self.empire_id,
+                    MemoryEntry.memory_type == "episodic",
+                    MemoryEntry.created_at < threshold,
+                    MemoryEntry.promoted_to_type.is_(None),
+                    MemoryEntry.importance_score < 0.6,
+                ))
+                .limit(50)
+            )
+            old_episodes = list(repo.session.execute(stmt).scalars().all())
 
-        threshold = datetime.now(timezone.utc) - timedelta(days=days)
-        stmt = (
-            select(MemoryEntry)
-            .where(and_(
-                MemoryEntry.empire_id == self.empire_id,
-                MemoryEntry.memory_type == "episodic",
-                MemoryEntry.created_at < threshold,
-                MemoryEntry.promoted_to_type.is_(None),
-                MemoryEntry.importance_score < 0.6,
-            ))
-            .limit(50)
-        )
-        old_episodes = list(repo.session.execute(stmt).scalars().all())
+            if len(old_episodes) < 5:
+                return 0
 
-        if len(old_episodes) < 5:
-            return 0
+            # Create summary
+            contents = [ep.content[:200] for ep in old_episodes]
+            summary_text = f"Summary of {len(old_episodes)} episodes:\n" + "\n".join(f"- {c}" for c in contents[:10])
 
-        # Create summary
-        contents = [ep.content[:200] for ep in old_episodes]
-        summary_text = f"Summary of {len(old_episodes)} episodes:\n" + "\n".join(f"- {c}" for c in contents[:10])
+            from core.memory.manager import MemoryManager
+            mm = MemoryManager(self.empire_id)
+            mm.store(
+                content=summary_text,
+                memory_type="experiential",
+                lieutenant_id=lieutenant_id,
+                title=f"Episode summary ({len(old_episodes)} episodes)",
+                category="episode_summary",
+                importance=0.5,
+                tags=["summary", "episodes"],
+                source_type="consolidation",
+            )
 
-        from core.memory.manager import MemoryManager
-        mm = MemoryManager(self.empire_id)
-        mm.store(
-            content=summary_text,
-            memory_type="experiential",
-            lieutenant_id=lieutenant_id,
-            title=f"Episode summary ({len(old_episodes)} episodes)",
-            category="episode_summary",
-            importance=0.5,
-            tags=["summary", "episodes"],
-            source_type="consolidation",
-        )
+            # Archive the old episodes (reduce their importance dramatically)
+            for ep in old_episodes:
+                ep.importance_score = 0.01
+                ep.effective_importance = 0.01
 
-        # Archive the old episodes (reduce their importance dramatically)
-        for ep in old_episodes:
-            ep.importance_score = 0.01
-            ep.effective_importance = 0.01
+            repo.flush()
+            repo.commit()
 
-        repo.flush()
-        repo.commit()
-
-        return len(old_episodes)
+            return len(old_episodes)
+        finally:
+            repo.session.close()
 
     def get_consolidation_stats(self, lieutenant_id: str = "") -> dict:
         """Get statistics about consolidation potential."""
