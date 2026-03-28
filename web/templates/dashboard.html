@@ -316,7 +316,7 @@
     function refreshDashboard() {
         dotEl.style.background = 'var(--amber)';
 
-        fetch('/dashboard/api/dashboard/stats')
+        fetch('/api/dashboard/stats')
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 dotEl.style.background = 'var(--green)';
