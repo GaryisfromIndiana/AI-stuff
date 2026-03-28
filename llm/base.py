@@ -322,15 +322,33 @@ class LLMClient(ABC):
         # ended with pending tool results), make one final call WITHOUT tools
         # to force the LLM to produce a text summary of everything gathered.
         if final_response and final_response.has_tool_calls:
-            logger.info("Tool loop ended with pending tool results — requesting final summary")
-            final_req = LLMRequest(
-                messages=messages,
-                model=request.model,
-                system_prompt=request.system_prompt,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
+            logger.info(
+                "Tool loop ended after %d rounds with pending tool calls — requesting final summary (messages=%d)",
+                max_rounds, len(messages),
             )
-            final_response = self.complete(final_req)
+            try:
+                # Add instruction to summarize without tools
+                messages.append(LLMMessage.user(
+                    "Now synthesize all the information gathered from the tool calls above "
+                    "into a comprehensive, well-structured response. Do not attempt to call "
+                    "any more tools — just write the final answer."
+                ))
+                final_req = LLMRequest(
+                    messages=messages,
+                    model=request.model,
+                    system_prompt=request.system_prompt,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                )
+                summary_response = self.complete(final_req)
+                logger.info(
+                    "Final summary: content_len=%d, finish=%s",
+                    len(summary_response.content), summary_response.finish_reason,
+                )
+                if summary_response.content:
+                    final_response = summary_response
+            except Exception as e:
+                logger.error("Final summary call failed: %s", e)
 
         return final_response or LLMResponse(content="", model=request.model, provider=self.provider_name)
 
