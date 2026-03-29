@@ -239,12 +239,18 @@ class ACEEngine:
                 result.error = execution["error"]
                 result.error_log.append(f"Execution error: {execution['error']}")
 
+            # ── Stage 2.5: Editor (fact extraction + verification) ────
+            editor_result = None
+            if result.content and len(result.content) >= 50:
+                editor_result = self._run_editor(task, execution)
+                result.cost_usd += editor_result.cost_usd if editor_result else 0.0
+
             # ── Stage 3: Critic loop ───────────────────────────────────
             critic_failures = 0
             for iteration in range(self._max_iterations):
                 result.pipeline_iterations = iteration + 1
 
-                critic_eval = self._run_critic(task, execution, system_prompt)
+                critic_eval = self._run_critic(task, execution, system_prompt, editor_result=editor_result)
                 result.critic_output = critic_eval
                 result.quality_score = critic_eval.get("overall_score", 0.0)
                 result.quality_details = critic_eval
@@ -296,6 +302,11 @@ class ACEEngine:
                     result.content = execution.get("content", "")
                     result.cost_usd += execution.get("cost", 0.0)
 
+                    # Re-run editor on new execution
+                    if result.content and len(result.content) >= 50:
+                        editor_result = self._run_editor(task, execution)
+                        result.cost_usd += editor_result.cost_usd if editor_result else 0.0
+
             if not result.success and result.quality_score > 0:
                 # Accept with lower quality if we exhausted iterations
                 result.success = result.quality_score >= (self._min_quality * 0.7)
@@ -304,6 +315,12 @@ class ACEEngine:
                 "content": result.content,
                 "planning": result.planning_output,
                 "quality": result.quality_details,
+                "editor": {
+                    "total_claims": editor_result.total_claims,
+                    "supported": editor_result.supported_count,
+                    "contradicted": editor_result.contradicted_count,
+                    "unverifiable": editor_result.unverifiable_count,
+                } if editor_result else None,
             }
 
         except Exception as e:
@@ -531,16 +548,42 @@ Call tools when you need real data — don't guess or hallucinate facts.
                 "tokens": response.total_tokens,
                 "cost": response.cost_usd,
                 "tool_calls_made": len(response.tool_calls) if response.tool_calls else 0,
+                "tool_log": response.tool_log,
             }
         except Exception as e:
             logger.exception("Execution failed: %s", e)
             return {"content": "", "error": str(e)}
+
+    def _run_editor(self, task: TaskInput, execution: dict):
+        """Run the Editor stage to extract and verify facts."""
+        try:
+            from core.ace.editor import Editor
+            editor = Editor(
+                router=self.router,
+                tool_registry=self._tool_registry,
+                empire_id=self._empire_id,
+            )
+            result = editor.run(
+                content=execution.get("content", ""),
+                tool_log=execution.get("tool_log", []),
+                task_title=task.title,
+            )
+            logger.info(
+                "Editor: %d claims, %d supported, %d contradicted, %d unverifiable",
+                result.total_claims, result.supported_count,
+                result.contradicted_count, result.unverifiable_count,
+            )
+            return result
+        except Exception as e:
+            logger.warning("Editor stage failed (continuing without): %s", e)
+            return None
 
     def _run_critic(
         self,
         task: TaskInput,
         execution: dict,
         system_prompt: str,
+        editor_result=None,
     ) -> dict:
         """Run the critic agent to evaluate the output quality."""
         content = execution.get("content", "")
@@ -573,6 +616,9 @@ Requirements: {', '.join(task.requirements) if task.requirements else 'None spec
 
 ## Output to Evaluate
 {content[:6000]}
+
+## Fact Verification (from Editor stage)
+{editor_result.to_critic_summary() if editor_result else "Editor stage was not run — evaluate factuality based on internal consistency only."}
 
 ## Instructions
 Evaluate the output quality on these dimensions (score 0.0 to 1.0):

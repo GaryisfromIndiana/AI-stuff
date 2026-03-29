@@ -113,6 +113,7 @@ class LLMResponse:
     tokens_output: int = 0
     cost_usd: float = 0.0
     tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_log: list[dict] = field(default_factory=list)  # [{tool, args, result, chars}] from complete_with_tools
     finish_reason: str = "stop"  # stop, tool_calls, length, error
     latency_ms: float = 0.0
     raw_response: Optional[Any] = None
@@ -272,6 +273,7 @@ class LLMClient(ABC):
         messages = list(request.messages)
         final_response = None
         tool_rounds = 0
+        tool_log: list[dict] = []
 
         for round_num in range(max_rounds):
             req = LLMRequest(
@@ -317,9 +319,21 @@ class LLMClient(ABC):
                     result_str = str(result)
                     logger.info("Tool %s returned %d chars", tc.name, len(result_str))
                     messages.append(LLMMessage.tool_result(tc.id, result_str, tc.name))
+                    tool_log.append({
+                        "tool": tc.name,
+                        "args": tc.arguments,
+                        "result": result_str[:2000],
+                        "chars": len(result_str),
+                    })
                 except Exception as e:
                     logger.error("Tool %s error: %s", tc.name, e)
                     messages.append(LLMMessage.tool_result(tc.id, f"Error: {e}", tc.name))
+                    tool_log.append({
+                        "tool": tc.name,
+                        "args": tc.arguments,
+                        "result": f"Error: {e}",
+                        "chars": 0,
+                    })
 
         # After multiple tool rounds, the LLM's "final" response may be a
         # brief or incomplete answer rather than a true synthesis.  Force a
@@ -367,6 +381,8 @@ class LLMClient(ABC):
             except Exception as e:
                 logger.error("Final summary call failed: %s", e)
 
+        if final_response:
+            final_response.tool_log = tool_log
         return final_response or LLMResponse(content="", model=request.model, provider=self.provider_name)
 
     def _record_usage(self, response: LLMResponse) -> None:
