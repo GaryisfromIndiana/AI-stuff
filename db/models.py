@@ -489,6 +489,117 @@ class KnowledgeRelation(Base):
         return f"<KnowledgeRelation(source={self.source_entity_id!r}, target={self.target_entity_id!r}, type={self.relation_type!r})>"
 
 
+class KnowledgeFact(Base):
+    """An atomic, verifiable claim attached to a knowledge entity.
+
+    Each fact is a single claim (e.g. "DeepSeek-V3.2 has 685B parameters")
+    with evidence, source attribution, verification status, and bi-temporal
+    validity. Smart deduplication prevents accumulation — similar facts
+    (>75% text overlap) are updated, not duplicated.
+    """
+
+    __tablename__ = "knowledge_facts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_generate_id)
+    empire_id: Mapped[str] = mapped_column(String(32), ForeignKey("empires.id", ondelete="CASCADE"), nullable=False)
+    entity_id: Mapped[Optional[str]] = mapped_column(
+        String(32), ForeignKey("knowledge_entities.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # The claim itself
+    claim: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[str] = mapped_column(Text, default="")  # Quote from source that supports the claim
+    category: Mapped[str] = mapped_column(String(64), default="general")  # metric, release, capability, pricing, etc.
+
+    # Source attribution
+    source_url: Mapped[str] = mapped_column(Text, default="")
+    source_tool: Mapped[str] = mapped_column(String(64), default="")  # e.g. mcp_huggingface_hub_repo_details, tavily_search
+    source_name: Mapped[str] = mapped_column(String(128), default="")  # e.g. "HuggingFace", "GitHub", "arXiv"
+
+    # Verification
+    verification_status: Mapped[str] = mapped_column(
+        String(16), default="unverified"
+    )  # unverified, supported, contradicted, unverifiable
+    verification_source: Mapped[str] = mapped_column(String(128), default="")  # tool/source used for verification
+    verification_detail: Mapped[str] = mapped_column(Text, default="")  # explanation of verification result
+
+    # Confidence & quality
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Bi-temporal validity
+    valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Deduplication
+    claim_hash: Mapped[str] = mapped_column(String(32), default="")  # MD5 of normalized claim for fast dedup
+
+    # Provenance
+    source_task_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    lieutenant_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    # Relationships
+    empire: Mapped[Empire] = relationship("Empire")
+    entity: Mapped[Optional[KnowledgeEntity]] = relationship("KnowledgeEntity")
+
+    __table_args__ = (
+        Index("ix_knowledge_facts_empire_id", "empire_id"),
+        Index("ix_knowledge_facts_entity_id", "entity_id"),
+        Index("ix_knowledge_facts_verification", "verification_status"),
+        Index("ix_knowledge_facts_empire_entity", "empire_id", "entity_id"),
+        Index("ix_knowledge_facts_claim_hash", "claim_hash"),
+        Index("ix_knowledge_facts_confidence", "confidence"),
+        Index("ix_knowledge_facts_source_name", "source_name"),
+        CheckConstraint("confidence >= 0.0 AND confidence <= 1.0", name="ck_fact_confidence"),
+        CheckConstraint(
+            "verification_status IN ('unverified', 'supported', 'contradicted', 'unverifiable')",
+            name="ck_fact_verification_status",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeFact(id={self.id!r}, claim={self.claim[:50]!r}, status={self.verification_status!r})>"
+
+
+class SourceReliability(Base):
+    """Tracks per-source reliability as an exponential moving average.
+
+    Updated when facts from a source get verified (boost) or contradicted
+    (penalize). Feeds into tool selection so lieutenants prefer proven sources.
+    """
+
+    __tablename__ = "source_reliability"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_generate_id)
+    empire_id: Mapped[str] = mapped_column(String(32), ForeignKey("empires.id", ondelete="CASCADE"), nullable=False)
+    source_name: Mapped[str] = mapped_column(String(128), nullable=False)  # e.g. "HuggingFace", "GitHub", "arXiv"
+
+    # EMA scores
+    reliability_score: Mapped[float] = mapped_column(Float, default=0.7)  # Current EMA (0.0-1.0)
+    total_checks: Mapped[int] = mapped_column(Integer, default=0)
+    supported_count: Mapped[int] = mapped_column(Integer, default=0)
+    contradicted_count: Mapped[int] = mapped_column(Integer, default=0)
+    unverifiable_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Metadata
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("empire_id", "source_name", name="uq_source_reliability_empire_source"),
+        Index("ix_source_reliability_empire", "empire_id"),
+        CheckConstraint("reliability_score >= 0.0 AND reliability_score <= 1.0", name="ck_source_reliability"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SourceReliability(source={self.source_name!r}, score={self.reliability_score:.2f})>"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Memory
 # ═══════════════════════════════════════════════════════════════════════════
