@@ -256,6 +256,18 @@ class ACEEngine:
                 result.quality_details = critic_eval
                 result.cost_usd += critic_eval.get("cost", 0.0)
 
+                # Run quality gate chain with critic scores + editor verification
+                gate_result = self._run_quality_gates(result.content, critic_eval, editor_result)
+                if gate_result:
+                    result.quality_details["gates"] = gate_result.to_dict()
+                    # If gates fail, cap the quality score
+                    if not gate_result.passed and result.quality_score >= self._min_quality:
+                        logger.info(
+                            "Task %s: critic scored %.2f but gates failed (%s) — capping score",
+                            task.id, result.quality_score, gate_result.summary,
+                        )
+                        result.quality_score = min(result.quality_score, self._min_quality - 0.01)
+
                 # Check if quality is acceptable
                 if result.quality_score >= self._min_quality:
                     result.success = True
@@ -576,6 +588,39 @@ Call tools when you need real data — don't guess or hallucinate facts.
             return result
         except Exception as e:
             logger.warning("Editor stage failed (continuing without): %s", e)
+            return None
+
+    def _run_quality_gates(self, content: str, critic_eval: dict, editor_result=None):
+        """Run the quality gate chain using critic scores and editor verification."""
+        try:
+            from core.ace.quality_gates import QualityGateChain
+
+            chain = QualityGateChain.from_settings()
+
+            # Build context from critic scores
+            context = {
+                "overall_score": critic_eval.get("overall_score", 0.0),
+                "confidence": critic_eval.get("confidence", 0.0),
+                "completeness": critic_eval.get("completeness", 0.0),
+                "coherence": critic_eval.get("coherence", 0.0),
+                "accuracy": critic_eval.get("accuracy", 0.0),
+            }
+
+            # Feed editor verification into the hallucination gate
+            if editor_result and editor_result.total_claims > 0:
+                contradicted_rate = editor_result.contradicted_count / editor_result.total_claims
+                context["hallucination_score"] = contradicted_rate
+                context["unsupported_claims"] = [
+                    c.claim for c in editor_result.claims
+                    if c.verification_status == "contradicted"
+                ]
+
+            gate_result = chain.run(content, context)
+            logger.info("Quality gates: %s", gate_result.summary)
+            return gate_result
+
+        except Exception as e:
+            logger.warning("Quality gate chain failed: %s", e)
             return None
 
     def _run_critic(
