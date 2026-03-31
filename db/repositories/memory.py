@@ -379,7 +379,14 @@ class MemoryRepository(BaseRepository[MemoryEntry]):
                         entry = entry_map.get(mid)
                         if entry:
                             results.append({"memory": entry, "similarity": score_map[mid]})
-                    return results
+                    if results:
+                        return results
+                    # Qdrant returned hits but none matched DB IDs — stale index.
+                    # Fall through to ILIKE search below.
+                    logger.warning(
+                        "Qdrant returned %d hits but 0 matched DB records — index is stale, falling back to text search",
+                        len(hits),
+                    )
         except Exception as e:
             logger.debug("Qdrant memory search unavailable, falling back to SQL: %s", e)
 
