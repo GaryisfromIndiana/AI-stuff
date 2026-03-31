@@ -294,11 +294,108 @@ class SchedulerDaemon:
         with self._lock:
             self._jobs.pop(job_name, None)
 
+    def _sync_from_db(self) -> int:
+        """Load persisted job state from the scheduler_jobs table.
+
+        Restores last_run, run_count, error_count so the daemon resumes
+        where it left off after a process restart instead of re-running everything.
+
+        Returns number of jobs synced.
+        """
+        synced = 0
+        try:
+            from db.engine import session_scope
+            from db.models import SchedulerJob
+            from sqlalchemy import select, and_
+
+            with session_scope() as session:
+                stmt = select(SchedulerJob).where(SchedulerJob.empire_id == self.empire_id)
+                db_jobs = {j.job_type: j for j in session.execute(stmt).scalars().all()}
+
+                with self._lock:
+                    for job in self._jobs.values():
+                        db_job = db_jobs.get(job.job_type)
+                        if db_job and db_job.last_run_at:
+                            job.last_run = db_job.last_run_at
+                            job.run_count = db_job.run_count or 0
+                            job.error_count = db_job.error_count or 0
+                            job.consecutive_errors = db_job.consecutive_errors or 0
+                            job.enabled = db_job.enabled
+                            synced += 1
+
+            if synced:
+                logger.info("Synced %d jobs from DB — resuming from last known state", synced)
+        except Exception as e:
+            logger.debug("DB sync on startup skipped: %s", e)
+        return synced
+
+    def _sync_to_db(self) -> None:
+        """Persist current job state to the scheduler_jobs table.
+
+        Called after each tick so job state survives process restarts.
+        """
+        try:
+            from db.engine import session_scope
+            from db.models import SchedulerJob
+            from sqlalchemy import select
+
+            with session_scope() as session:
+                with self._lock:
+                    for job in self._jobs.values():
+                        # Upsert: find existing or create
+                        existing = session.execute(
+                            select(SchedulerJob).where(
+                                SchedulerJob.empire_id == self.empire_id,
+                                SchedulerJob.job_type == job.job_type,
+                            )
+                        ).scalar_one_or_none()
+
+                        now = datetime.now(timezone.utc)
+                        next_run = None
+                        if job.last_run:
+                            from datetime import timedelta
+                            next_run = job.last_run + timedelta(seconds=job.interval_seconds)
+
+                        if existing:
+                            existing.last_run_at = job.last_run
+                            existing.next_run_at = next_run
+                            existing.run_count = job.run_count
+                            existing.success_count = job.run_count - job.error_count
+                            existing.error_count = job.error_count
+                            existing.consecutive_errors = job.consecutive_errors
+                            existing.last_error = job.last_error or None
+                            existing.avg_duration_ms = job.avg_duration_ms or None
+                            existing.enabled = job.enabled
+                            existing.status = "active" if job.enabled else "disabled"
+                        else:
+                            db_job = SchedulerJob(
+                                empire_id=self.empire_id,
+                                job_type=job.job_type,
+                                name=job.name,
+                                description=job.description,
+                                status="active" if job.enabled else "disabled",
+                                enabled=job.enabled,
+                                interval_seconds=job.interval_seconds,
+                                priority=job.priority,
+                                last_run_at=job.last_run,
+                                next_run_at=next_run,
+                                run_count=job.run_count,
+                                success_count=job.run_count - job.error_count,
+                                error_count=job.error_count,
+                                consecutive_errors=job.consecutive_errors,
+                                last_error=job.last_error or None,
+                                avg_duration_ms=job.avg_duration_ms or None,
+                            )
+                            session.add(db_job)
+        except Exception as e:
+            logger.debug("DB sync after tick failed: %s", e)
+
     def start(self) -> None:
         """Start the scheduler daemon in a background thread.
 
-        Staggers job first-runs so they don't all fire on the first tick.
-        Only health_check and budget_check run immediately; others wait their interval.
+        On startup, syncs job state from the DB so the daemon resumes where
+        it left off after a process restart. Only staggers jobs if this is a
+        fresh start (no DB state).
         """
         if self._running:
             logger.warning("Scheduler already running")
@@ -308,19 +405,22 @@ class SchedulerDaemon:
         self._start_time = time.time()
         self._stop_event.clear()
 
-        # Stagger jobs — set last_run to now so they wait their full interval
-        # Only quick jobs (health_check, budget_check, directive_check) run on first tick
-        now = datetime.now(timezone.utc)
-        immediate_jobs = {"health_check", "budget_check", "directive_check"}
-        with self._lock:
-            for job in self._jobs.values():
-                if job.name not in immediate_jobs:
-                    job.last_run = now  # Will wait full interval before first run
+        # Try to restore job state from DB (survives process restarts)
+        synced = self._sync_from_db()
+
+        if synced == 0:
+            # Fresh start — stagger jobs so they don't all fire on first tick
+            now = datetime.now(timezone.utc)
+            immediate_jobs = {"health_check", "budget_check", "directive_check"}
+            with self._lock:
+                for job in self._jobs.values():
+                    if job.name not in immediate_jobs:
+                        job.last_run = now  # Will wait full interval before first run
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="empire-scheduler")
         self._thread.start()
 
-        logger.info("Scheduler daemon started (tick_interval=%ds, jobs=%d)", self.tick_interval, len(self._jobs))
+        logger.info("Scheduler daemon started (tick_interval=%ds, jobs=%d, synced=%d)", self.tick_interval, len(self._jobs), synced)
 
     def stop(self) -> None:
         """Stop the scheduler daemon gracefully."""
@@ -438,6 +538,10 @@ class SchedulerDaemon:
                         job.enabled = True
                         job.consecutive_errors = 0
                         logger.info("Job %s auto-re-enabled after cooldown", job.name)
+
+        # Persist job state to DB so it survives process restarts
+        if executed:
+            self._sync_to_db()
 
         return executed
 
