@@ -225,7 +225,6 @@ def execute_command():
         return jsonify({"error": "No command or topic provided"}), 400
 
     try:
-        import json
         from llm.router import ModelRouter, TaskMetadata
         from llm.base import LLMRequest, LLMMessage
         router = ModelRouter(empire_id)

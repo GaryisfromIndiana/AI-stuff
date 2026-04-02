@@ -6,7 +6,6 @@ Extracted from god_panel.py so it can be called from any coordination layer
 
 from __future__ import annotations
 
-import json
 import logging
 
 logger = logging.getLogger(__name__)

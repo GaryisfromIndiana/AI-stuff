@@ -96,40 +96,49 @@ class SchedulerDaemon:
             s = DefaultScheduler()
 
         # (name, interval_seconds, priority, description)
+        #
+        # Jobs are categorized by what they produce:
+        #   INFRASTRUCTURE — keeps the system healthy (no API cost)
+        #   RESEARCH       — discovers new information (API cost, produces knowledge)
+        #   MAINTENANCE    — improves existing knowledge quality (some API cost)
+        #
+        # CUT: learning_cycle (lieutenants are cosmetic — same engine, different prompt)
+        # CUT: autonomous_warroom (sequential summarization, not real debate — expensive theater)
+        # CUT: auto_spawn (spawns more cosmetic lieutenants)
+        # CUT: cross_synthesis (overlaps with research pipeline, no unique output)
+        # CUT: shallow_enrichment (LLM-rewrites entity descriptions — low signal, high cost)
+        # CUT: content_generation (no audience defined — generate reports on demand instead)
+        #
         jobs = [
-            # ── Core system jobs ─────────────────────────────────────
+            # ── Infrastructure (no API cost) ─────────────────────────
             ("health_check",         s.health_check_interval_minutes * 60, 1, "System health checks"),
             ("budget_check",         900,                                  2, "Budget limit checking"),
             ("directive_check",      300,                                  3, "Check for pending directives"),
             ("memory_decay",         3600,                                 3, "Apply memory decay"),
-            # ── Knowledge & research ─────────────────────────────────
-            ("knowledge_maintenance", s.knowledge_maintenance_hours * 3600, 4, "Knowledge graph maintenance"),
+            ("cleanup",              86400,                                3, "Retention policy enforcement"),
+            ("embedding_backfill",   3600,                                 4, "Backfill embeddings for vector search"),
+            ("duplicate_resolution", 14400,                                5, "3-stage fuzzy entity deduplication"),
+            # ── Research (API cost → new knowledge) ──────────────────
             ("intelligence_sweep",   43200,                                4, "Proactive discovery across AI sources"),
             ("autonomous_research",  21600,                                4, "Gap-driven autonomous research"),
-            ("learning_cycle",       s.learning_cycle_hours * 3600,        5, "Lieutenant learning cycles"),
-            ("quality_scoring",      21600,                                5, "8-dimension entity quality scoring"),
-            ("duplicate_resolution", 14400,                                5, "3-stage fuzzy entity deduplication"),
-            ("cross_synthesis",      28800,                                5, "Synthesize overlapping knowledge across domains"),
-            ("autonomous_warroom",   21600,                                5, "Auto-detect cross-domain topics and run debates"),
-            # ── Evolution & maintenance ──────────────────────────────
-            ("evolution_cycle",      s.evolution_cycle_hours * 3600,        6, "Self-improvement evolution cycle"),
-            ("memory_compression",   43200,                                6, "LLM-powered memory compression"),
-            ("llm_audit",            43200,                                6, "Deep LLM audit for contaminated entities"),
             ("iterative_deepening",  28800,                                6, "Deepen high-signal shallow research"),
-            ("content_generation",   86400,                                7, "Auto-generate research digest"),
-            ("auto_spawn",           86400,                                7, "Auto-spawn lieutenants for uncovered clusters"),
-            ("shallow_enrichment",   21600,                                7, "Enrich low-detail knowledge graph entities"),
-            ("cleanup",              86400,                                8, "Archive and cleanup old data"),
-            ("embedding_backfill",   3600,                                 8, "Backfill embeddings for memories and entities"),
+            # ── Quality (some API cost → better knowledge) ───────────
+            ("knowledge_maintenance", s.knowledge_maintenance_hours * 3600, 4, "Knowledge graph maintenance"),
+            ("quality_scoring",      21600,                                5, "8-dimension entity quality scoring"),
+            ("llm_audit",            43200,                                6, "Deep LLM audit for contaminated entities"),
+            ("memory_compression",   43200,                                6, "LLM-powered memory compression"),
+            ("evolution_cycle",      s.evolution_cycle_hours * 3600,        7, "Self-improvement evolution cycle"),
         ]
 
         for name, interval, priority, description in jobs:
             handler = getattr(self, f"_run_{name}", None)
-            if handler:
-                self.register_job(JobConfig(
-                    name=name, interval_seconds=interval, handler=handler,
-                    priority=priority, description=description,
-                ))
+            if not handler:
+                logger.error("Scheduler job '%s' has no handler method _run_%s", name, name)
+                continue
+            self.register_job(JobConfig(
+                name=name, interval_seconds=interval, handler=handler,
+                priority=priority, description=description,
+            ))
 
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
@@ -514,12 +523,6 @@ class SchedulerDaemon:
         report = maintainer.run_maintenance()
         return {"health_score": report.health_score, "entities": report.entity_count}
 
-    def _run_learning_cycle(self) -> dict:
-        """Run lieutenant learning cycles."""
-        from core.lieutenant.manager import LieutenantManager
-        manager = LieutenantManager(self.empire_id)
-        return manager.run_all_learning_cycles()
-
     def _run_evolution_cycle(self) -> dict:
         """Run evolution cycle."""
         from core.evolution.cycle import EvolutionCycleManager
@@ -628,17 +631,6 @@ class SchedulerDaemon:
             logger.warning("Autonomous research failed: %s", e)
             return {"error": str(e)}
 
-    def _run_content_generation(self) -> dict:
-        """Auto-generate a research digest from recent findings."""
-        try:
-            from core.content.generator import ContentGenerator
-            gen = ContentGenerator(self.empire_id)
-            report = gen.generate_weekly_digest()
-            return {"report_id": report.get("id", ""), "sections": report.get("sections", 0)}
-        except Exception as e:
-            logger.warning("Content generation failed: %s", e)
-            return {"error": str(e)}
-
     def _run_llm_audit(self) -> dict:
         """Deep LLM audit for contaminated/hallucinated entities."""
         try:
@@ -647,17 +639,6 @@ class SchedulerDaemon:
             return maintainer.deep_llm_audit(batch_size=20)
         except Exception as e:
             logger.warning("LLM audit failed: %s", e)
-            return {"error": str(e)}
-
-    def _run_auto_spawn(self) -> dict:
-        """Auto-spawn lieutenants for uncovered topic clusters."""
-        try:
-            from core.knowledge.maintenance import KnowledgeMaintainer
-            maintainer = KnowledgeMaintainer(self.empire_id)
-            spawned = maintainer.auto_spawn_lieutenants(max_spawns=2)
-            return {"spawned": len(spawned), "details": spawned}
-        except Exception as e:
-            logger.warning("Auto-spawn failed: %s", e)
             return {"error": str(e)}
 
     def _run_iterative_deepening(self) -> dict:
@@ -674,47 +655,6 @@ class SchedulerDaemon:
             }
         except Exception as e:
             logger.warning("Iterative deepening failed: %s", e)
-            return {"error": str(e)}
-
-    def _run_shallow_enrichment(self) -> dict:
-        """Find and enrich low-detail entities."""
-        try:
-            from core.research.enrichment import ShallowEnricher
-            enricher = ShallowEnricher(self.empire_id)
-            result = enricher.run_enrichment_cycle(max_entities=10)
-            return {
-                "scanned": result.entities_scanned,
-                "enriched": result.enriched,
-                "descriptions_improved": result.descriptions_improved,
-                "fields_added": result.fields_added,
-            }
-        except Exception as e:
-            logger.warning("Shallow enrichment failed: %s", e)
-            return {"error": str(e)}
-
-    def _run_cross_synthesis(self) -> dict:
-        """Find cross-domain overlaps and synthesize insights."""
-        try:
-            from core.research.cross_synthesis import CrossLieutenantSynthesizer
-            synthesizer = CrossLieutenantSynthesizer(self.empire_id)
-            result = synthesizer.run_synthesis_cycle(max_syntheses=3)
-            return {
-                "overlaps_detected": result.overlaps_detected,
-                "syntheses_produced": result.syntheses_produced,
-                "insights": result.total_insights,
-                "cost_usd": result.total_cost_usd,
-            }
-        except Exception as e:
-            logger.warning("Cross-lieutenant synthesis failed: %s", e)
-            return {"error": str(e)}
-
-    def _run_autonomous_warroom(self) -> dict:
-        """Auto-detect cross-domain topics and run lieutenant debates."""
-        try:
-            from core.warroom.session import run_autonomous_debate
-            return run_autonomous_debate(self.empire_id)
-        except Exception as e:
-            logger.warning("Autonomous war room failed: %s", e)
             return {"error": str(e)}
 
     def _run_embedding_backfill(self) -> dict:

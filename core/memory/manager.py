@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -145,6 +145,10 @@ class MemoryManager:
     ) -> list[dict]:
         """Recall memories matching a query.
 
+        Uses semantic vector search (Qdrant) when available, with fallback
+        to text ILIKE search. Vector search finds conceptually related
+        memories even when keywords don't match.
+
         Args:
             query: Search query.
             memory_types: Filter by memory types.
@@ -159,13 +163,22 @@ class MemoryManager:
 
         with repo_scope(MemoryRepository) as repo:
             if query:
-                entries = repo.search(
-                    query=query,
-                    empire_id=self.empire_id,
-                    lieutenant_id=lieutenant_id or None,
+                # Try vector search first — finds semantically similar memories
+                entries = self._vector_recall(
+                    query, repo,
                     memory_types=memory_types,
+                    lieutenant_id=lieutenant_id or None,
                     limit=limit,
                 )
+                # Fall back to text search if vector search returned nothing
+                if not entries:
+                    entries = repo.search(
+                        query=query,
+                        empire_id=self.empire_id,
+                        lieutenant_id=lieutenant_id or None,
+                        memory_types=memory_types,
+                        limit=limit,
+                    )
             else:
                 entries = repo.get_most_important(
                     empire_id=self.empire_id,
@@ -190,6 +203,7 @@ class MemoryManager:
                     "title": e.title,
                     "content": e.content,
                     "importance": e.effective_importance,
+                    "confidence": e.confidence_score,
                     "category": e.category,
                     "tags": e.tags_json,
                     "metadata": e.metadata_json,
@@ -197,6 +211,66 @@ class MemoryManager:
                 }
                 for e in entries
             ]
+
+    def _vector_recall(
+        self,
+        query: str,
+        repo: Any,
+        memory_types: list[str] | None = None,
+        lieutenant_id: str | None = None,
+        limit: int = 20,
+    ) -> list:
+        """Attempt semantic recall via embeddings + Qdrant.
+
+        Only used when: Qdrant is configured, query is substantive (>3 words),
+        and the embedding API is reachable. Falls back silently on any failure.
+
+        Returns DB MemoryEntry objects or empty list.
+        """
+        # Skip vector search for very short queries — keyword ILIKE is
+        # faster and sufficient for "GPT-4o" or "Claude Sonnet"
+        if len(query.split()) <= 3:
+            return []
+
+        try:
+            from core.vector.store import VectorStore
+            vs = VectorStore.get_instance(self.empire_id)
+            if not vs.enabled:
+                return []
+
+            from core.memory.embeddings import generate_embedding
+            embedding = generate_embedding(query)
+            if not embedding:
+                return []
+
+            hits = vs.search_memories(
+                embedding=embedding,
+                empire_id=self.empire_id,
+                lieutenant_id=lieutenant_id,
+                memory_types=memory_types,
+                limit=limit,
+            )
+            if not hits:
+                return []
+
+            memory_ids = [h["memory_id"] for h in hits if h.get("memory_id")]
+            if not memory_ids:
+                return []
+
+            from db.models import MemoryEntry
+            from sqlalchemy import select
+            entries = list(repo.session.execute(
+                select(MemoryEntry).where(MemoryEntry.id.in_(memory_ids))
+            ).scalars().all())
+
+            # Preserve Qdrant's relevance ordering
+            id_to_score = {h["memory_id"]: h["score"] for h in hits}
+            entries.sort(key=lambda e: id_to_score.get(e.id, 0), reverse=True)
+            return entries
+
+        except Exception as e:
+            logger.debug("Vector recall unavailable: %s", e)
+            return []
 
     def recall_for_context(
         self,
@@ -329,7 +403,10 @@ class MemoryManager:
 
                     # Age-based decay multiplier
                     if entry.created_at:
-                        age_days = (now - entry.created_at).total_seconds() / 86400
+                        created = entry.created_at
+                        if created.tzinfo is None:
+                            created = created.replace(tzinfo=timezone.utc)
+                        age_days = (now - created).total_seconds() / 86400
                         if age_days > 90:
                             actual_rate *= 2.0
                         elif age_days > 30:
@@ -352,32 +429,83 @@ class MemoryManager:
         return count
 
     def cleanup(self, importance_threshold: float = 0.05) -> dict:
-        """Clean up low-value and expired memories.
+        """Enforce retention policy — delete memories that no longer earn their storage.
 
-        Args:
-            importance_threshold: Remove memories below this importance.
+        Retention rules:
+        - Expired memories (past expires_at): always delete
+        - Fully decayed (effective_importance < threshold): delete
+        - Old episodic (>30 days, not promoted, low importance): delete
+        - Superseded temporal facts (>90 days since superseded): delete
+        - God Panel command noise (>7 days, category=god_panel_command): delete
 
         Returns:
-            Cleanup stats.
+            Cleanup stats with counts per category.
         """
-        from db.engine import repo_scope
-        from db.repositories.memory import MemoryRepository
+        from db.engine import session_scope
+        from db.models import MemoryEntry
+        from sqlalchemy import delete, and_
 
-        with repo_scope(MemoryRepository) as repo:
-            expired = repo.cleanup_expired(self.empire_id)
-            low_importance = repo.cleanup_low_importance(self.empire_id, threshold=importance_threshold)
-            old_episodic = repo.cleanup_old_episodic(self.empire_id, days=30)
+        now = datetime.now(timezone.utc)
+        stats = {}
 
-            repo.commit()
+        with session_scope() as session:
+            # 1. Expired memories (hard TTL)
+            result = session.execute(delete(MemoryEntry).where(and_(
+                MemoryEntry.empire_id == self.empire_id,
+                MemoryEntry.expires_at.is_not(None),
+                MemoryEntry.expires_at < now,
+            )))
+            stats["expired"] = result.rowcount
 
-            stats = {
-                "expired_removed": expired,
-                "low_importance_removed": low_importance,
-                "old_episodic_removed": old_episodic,
-                "total_removed": expired + low_importance + old_episodic,
-            }
-            logger.info("Memory cleanup: %s", stats)
-            return stats
+            # 2. Fully decayed — importance fell below threshold via decay cycles
+            result = session.execute(delete(MemoryEntry).where(and_(
+                MemoryEntry.empire_id == self.empire_id,
+                MemoryEntry.effective_importance < importance_threshold,
+                MemoryEntry.decay_factor < 0.1,  # Only if actually decayed, not just low-importance
+            )))
+            stats["decayed"] = result.rowcount
+
+            # 3. Old episodic — transient context, not promoted
+            result = session.execute(delete(MemoryEntry).where(and_(
+                MemoryEntry.empire_id == self.empire_id,
+                MemoryEntry.memory_type == "episodic",
+                MemoryEntry.created_at < now - timedelta(days=30),
+                MemoryEntry.promoted_to_type.is_(None),
+                MemoryEntry.importance_score < 0.5,
+            )))
+            stats["old_episodic"] = result.rowcount
+
+            # 4. Superseded temporal facts — the old version has been replaced,
+            #    keep it for 90 days for audit trail, then delete
+            from sqlalchemy import select
+            old_temporal = list(session.execute(
+                select(MemoryEntry).where(and_(
+                    MemoryEntry.empire_id == self.empire_id,
+                    MemoryEntry.source_type == "temporal_fact",
+                    MemoryEntry.created_at < now - timedelta(days=90),
+                ))
+            ).scalars().all())
+
+            superseded_ids = [
+                e.id for e in old_temporal
+                if isinstance(e.metadata_json, dict) and e.metadata_json.get("superseded_at")
+            ]
+            if superseded_ids:
+                session.execute(delete(MemoryEntry).where(MemoryEntry.id.in_(superseded_ids)))
+            stats["old_superseded"] = len(superseded_ids)
+
+            # 5. God Panel command memories — these are now tracked in their own table,
+            #    clean legacy entries older than 7 days
+            result = session.execute(delete(MemoryEntry).where(and_(
+                MemoryEntry.empire_id == self.empire_id,
+                MemoryEntry.category == "god_panel_command",
+                MemoryEntry.created_at < now - timedelta(days=7),
+            )))
+            stats["god_panel_legacy"] = result.rowcount
+
+        stats["total_removed"] = sum(stats.values())
+        logger.info("Retention cleanup: %s", stats)
+        return stats
 
     def get_stats(self, lieutenant_id: str = "") -> MemoryStats:
         """Get memory statistics.

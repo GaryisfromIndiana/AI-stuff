@@ -242,13 +242,13 @@ class LLMClient(ABC):
         model = request.model or self._default_model
         self._wait_for_rate_limit(request)
 
-        start_time = time.time()
         last_error = None
 
         for attempt in range(self._max_retries):
             try:
+                call_start = time.time()
                 raw = self._call_provider(request, model)
-                latency_ms = (time.time() - start_time) * 1000
+                latency_ms = (time.time() - call_start) * 1000
                 response = self._parse_response(raw, model, latency_ms)
                 self._record_usage(response)
                 return response

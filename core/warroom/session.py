@@ -534,10 +534,9 @@ def run_autonomous_debate(empire_id: str) -> dict:
     Called by the scheduler's autonomous_warroom job and the God Panel's
     auto-detect warroom trigger.
     """
-    import json
     from core.memory.manager import MemoryManager
     from core.memory.bitemporal import BiTemporalMemory
-    from db.engine import read_session, get_session
+    from db.engine import get_session
     from db.repositories.lieutenant import LieutenantRepository
     from db.models import _generate_id
 

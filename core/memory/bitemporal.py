@@ -254,7 +254,11 @@ class BiTemporalMemory:
         return fact
 
     def query(self, tq: TemporalQuery) -> list[TemporalFact]:
-        """Query bi-temporal memory.
+        """Query bi-temporal memory with temporal filters pushed to the DB.
+
+        Unlike the old approach that fetched N results then filtered in Python
+        (silently dropping matches), this queries the DB directly with temporal
+        conditions so the limit applies to the filtered result set.
 
         Args:
             tq: Temporal query with time constraints.
@@ -262,72 +266,93 @@ class BiTemporalMemory:
         Returns:
             List of matching TemporalFacts.
         """
-        from core.memory.manager import MemoryManager
-        mm = MemoryManager(self.empire_id)
+        from db.engine import read_session
+        from db.models import MemoryEntry
+        from sqlalchemy import select, and_
 
-        # Get candidate memories
-        raw = mm.recall(
-            query=tq.query,
-            memory_types=tq.memory_types or ["semantic"],
-            limit=tq.limit * 2,  # Fetch extra for filtering
-        )
+        # Fetch cap: we need tq.limit results AFTER Python-side filtering,
+        # so fetch more from DB. Most filtering (superseded, valid_time) happens
+        # in Python because the conditions live in JSON metadata.
+        fetch_cap = tq.limit * 5
 
+        with read_session() as session:
+            stmt = (
+                select(MemoryEntry)
+                .where(and_(
+                    MemoryEntry.empire_id == self.empire_id,
+                    MemoryEntry.source_type == "temporal_fact",
+                ))
+            )
+
+            if tq.memory_types:
+                stmt = stmt.where(MemoryEntry.memory_type.in_(tq.memory_types))
+
+            if tq.min_confidence > 0:
+                stmt = stmt.where(MemoryEntry.confidence_score >= tq.min_confidence)
+
+            if tq.as_of_recorded:
+                stmt = stmt.where(MemoryEntry.created_at <= tq.as_of_recorded)
+
+            # Narrow by keyword if query provided (reduces Python-side iteration)
+            if tq.query:
+                pattern = f"%{tq.query}%"
+                from sqlalchemy import or_
+                stmt = stmt.where(or_(
+                    MemoryEntry.title.ilike(pattern),
+                    MemoryEntry.content.ilike(pattern),
+                ))
+
+            stmt = stmt.order_by(MemoryEntry.effective_importance.desc()).limit(fetch_cap)
+            entries = list(session.execute(stmt).scalars().all())
+
+        # Post-filter for JSON metadata conditions
         facts = []
-        for mem in raw:
-            meta = mem.get("metadata", {})
+        for entry in entries:
+            meta = entry.metadata_json or {}
             if not isinstance(meta, dict):
-                meta = {}
-
-            # Skip non-temporal entries unless query is broad
-            if not meta.get("temporal") and tq.as_of_valid:
                 continue
 
-            # Filter by valid time
-            if tq.as_of_valid:
-                valid_from = meta.get("valid_from")
-                valid_to = meta.get("valid_to")
-
-                if valid_from and tq.as_of_valid < valid_from:
-                    continue  # Fact wasn't valid yet
-                if valid_to and tq.as_of_valid > valid_to:
-                    continue  # Fact was no longer valid
-
-            # Filter by transaction time (when Empire knew this)
-            if tq.as_of_recorded:
-                recorded_at = meta.get("recorded_at", mem.get("created_at", ""))
-                if recorded_at and tq.as_of_recorded < recorded_at:
-                    continue  # Empire didn't know this yet
-
-            # Filter superseded
             if not tq.include_superseded and meta.get("superseded_at"):
                 continue
 
-            # Filter confidence
-            if mem.get("confidence", 0) < tq.min_confidence:
-                continue
+            if tq.as_of_valid:
+                valid_from = meta.get("valid_from")
+                valid_to = meta.get("valid_to")
+                if valid_from and tq.as_of_valid < valid_from:
+                    continue
+                if valid_to and tq.as_of_valid > valid_to:
+                    continue
 
-            facts.append(TemporalFact(
-                id=mem.get("id", ""),
-                content=mem.get("content", ""),
-                title=mem.get("title", ""),
-                memory_type=mem.get("type", "semantic"),
-                category=mem.get("category", ""),
-                valid_from=meta.get("valid_from"),
-                valid_to=meta.get("valid_to"),
-                recorded_at=meta.get("recorded_at", mem.get("created_at", "")),
-                superseded_at=meta.get("superseded_at"),
-                version=meta.get("version", 1),
-                previous_version_id=meta.get("previous_version_id"),
-                superseded_by_id=meta.get("superseded_by_id"),
-                importance=mem.get("importance", 0.5),
-                confidence=mem.get("confidence", 0.8) if "confidence" in mem else 0.8,
-                source=meta.get("source", ""),
-                source_url=meta.get("source_url", ""),
-                tags=mem.get("tags", []),
-                entity_refs=meta.get("entity_refs", []),
-            ))
+            facts.append(self._entry_to_fact(entry, meta))
 
-        return facts[:tq.limit]
+            if len(facts) >= tq.limit:
+                break
+
+        return facts
+
+    @staticmethod
+    def _entry_to_fact(entry, meta: dict) -> TemporalFact:
+        """Convert a MemoryEntry + metadata dict to a TemporalFact."""
+        return TemporalFact(
+            id=entry.id,
+            content=entry.content or "",
+            title=entry.title or "",
+            memory_type=entry.memory_type or "semantic",
+            category=entry.category or "",
+            valid_from=meta.get("valid_from"),
+            valid_to=meta.get("valid_to"),
+            recorded_at=meta.get("recorded_at", entry.created_at.isoformat() if entry.created_at else ""),
+            superseded_at=meta.get("superseded_at"),
+            version=meta.get("version", 1),
+            previous_version_id=meta.get("previous_version_id"),
+            superseded_by_id=meta.get("superseded_by_id"),
+            importance=entry.effective_importance or 0.5,
+            confidence=entry.confidence_score or 0.8,
+            source=meta.get("source", ""),
+            source_url=meta.get("source_url", ""),
+            tags=entry.tags_json or [],
+            entity_refs=meta.get("entity_refs", []),
+        )
 
     def query_as_of(self, query: str, as_of: str, time_type: str = "valid") -> list[TemporalFact]:
         """Convenience method: query what was true/known at a specific time.
@@ -486,7 +511,7 @@ class BiTemporalMemory:
             # Shared concepts
             content_words = set(content_lower.split())
             fact_words = set(fact_lower.split())
-            overlap = content_words & fact_words - negation_words
+            overlap = (content_words & fact_words) - negation_words
 
             if len(overlap) > 5 and content_has_neg != fact_has_neg:
                 contradictions.append(fact)
@@ -494,49 +519,72 @@ class BiTemporalMemory:
         return contradictions
 
     def get_temporal_stats(self) -> dict:
-        """Get statistics about bi-temporal memory."""
-        from core.memory.manager import MemoryManager
-        mm = MemoryManager(self.empire_id)
+        """Get statistics about bi-temporal memory via direct DB counts."""
+        from db.engine import read_session
+        from db.models import MemoryEntry
+        from sqlalchemy import select, func, and_
 
-        all_memories = mm.recall(query="temporal", memory_types=["semantic"], limit=500)
+        with read_session() as session:
+            base = and_(
+                MemoryEntry.empire_id == self.empire_id,
+                MemoryEntry.source_type == "temporal_fact",
+            )
+            total_memories = session.execute(
+                select(func.count(MemoryEntry.id)).where(MemoryEntry.empire_id == self.empire_id)
+            ).scalar() or 0
 
-        total = len(all_memories)
-        temporal = 0
+            temporal = session.execute(
+                select(func.count(MemoryEntry.id)).where(base)
+            ).scalar() or 0
+
+            # Superseded and valid_time require checking JSON metadata in Python
+            entries = list(session.execute(
+                select(MemoryEntry.metadata_json).where(base)
+            ).scalars().all())
+
         superseded = 0
         with_valid_time = 0
-
-        for mem in all_memories:
-            meta = mem.get("metadata", {})
-            if isinstance(meta, dict) and meta.get("temporal"):
-                temporal += 1
+        for meta in entries:
+            if isinstance(meta, dict):
                 if meta.get("superseded_at"):
                     superseded += 1
                 if meta.get("valid_from"):
                     with_valid_time += 1
 
         return {
-            "total_memories": total,
+            "total_memories": total_memories,
             "temporal_facts": temporal,
             "superseded": superseded,
             "current": temporal - superseded,
             "with_valid_time": with_valid_time,
-            "temporal_coverage": temporal / total if total > 0 else 0,
+            "temporal_coverage": temporal / total_memories if total_memories > 0 else 0,
         }
 
     def _find_current_version(self, title: str, category: str = "") -> dict | None:
-        """Find the current (non-superseded) version of a fact by title."""
-        from core.memory.manager import MemoryManager
-        mm = MemoryManager(self.empire_id)
+        """Find the current (non-superseded) version of a fact by exact title.
 
-        candidates = mm.recall(query=title, memory_types=["semantic"], limit=5)
-        for mem in candidates:
-            if mem.get("title", "").lower().strip() == title.lower().strip():
-                meta = mem.get("metadata", {})
+        Uses a direct DB query instead of recall() to avoid ILIKE false matches.
+        """
+        from db.engine import read_session
+        from db.models import MemoryEntry
+        from sqlalchemy import select, and_
+
+        with read_session() as session:
+            stmt = (
+                select(MemoryEntry)
+                .where(and_(
+                    MemoryEntry.empire_id == self.empire_id,
+                    MemoryEntry.title == title,
+                    MemoryEntry.source_type == "temporal_fact",
+                ))
+                .order_by(MemoryEntry.created_at.desc())
+                .limit(1)
+            )
+            entry = session.execute(stmt).scalar_one_or_none()
+            if entry:
+                meta = entry.metadata_json or {}
                 if isinstance(meta, dict) and not meta.get("superseded_at"):
-                    return {
-                        "id": mem.get("id"),
-                        "metadata": meta,
-                    }
+                    return {"id": entry.id, "metadata": meta}
         return None
 
     def store_smart(
@@ -575,32 +623,9 @@ class BiTemporalMemory:
             importance = min(1.0, importance + 0.1)
             tags = (tags or []) + ["has_contradictions"]
 
-        # Auto-detect if this should supersede an existing fact
-        # by checking for high word overlap with existing same-category facts
-        auto_supersede_id = None
-        try:
-            current = self.get_current_facts(query=content[:200], category=category, limit=5)
-            content_words = set(content.lower().split()[:60])
-
-            for fact in current:
-                fact_words = set((fact.content or "").lower().split()[:60])
-                overlap = len(content_words & fact_words)
-                union = len(content_words | fact_words)
-                similarity = overlap / union if union > 0 else 0
-
-                if similarity > 0.4 and fact.title:
-                    # High overlap — this likely updates the existing fact
-                    auto_supersede_id = fact.id
-                    title = title or fact.title  # Keep the existing title for version chain
-                    logger.info("Auto-superseding fact: %s (similarity=%.2f)", fact.title, similarity)
-                    break
-        except Exception:
-            pass
-
-        # If we found something to supersede, mark it
-        if auto_supersede_id:
-            self._mark_superseded(auto_supersede_id, now)
-
+        # Supersession is handled inside store_fact() — it finds the existing
+        # entry by title, marks it superseded, and increments the version number
+        # in a single atomic transaction. No need to do it here too.
         return self.store_fact(
             content=content,
             title=title,

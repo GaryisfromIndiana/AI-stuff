@@ -61,7 +61,8 @@ def empire_route(fn):
             if isinstance(result, Response):
                 return result
             if isinstance(result, tuple):
-                return jsonify(result[0]), result[1]
+                # Support (data, status) and (data, status, headers)
+                return jsonify(result[0]), *result[1:]
             return jsonify(result)
         except Exception as e:
             return jsonify({"error": _safe_error(e)}), 500
