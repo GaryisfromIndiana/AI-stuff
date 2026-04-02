@@ -267,15 +267,19 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
         Returns:
             List of {entity, relation, depth} dicts.
         """
-        # Resolve empire_id from the starting entity to prevent cross-empire leaks
-        start_entity = self.get(entity_id)
-        if not start_entity:
-            return []
-        empire_id = start_entity.empire_id
-
         visited = {entity_id}
         results = []
         current_ids = [entity_id]
+
+        # Resolve the starting entity's empire_id to scope traversal
+        # and prevent cross-tenant data leaks
+        _empire_id: str | None = None
+        try:
+            start_entity = self.session.get(KnowledgeEntity, entity_id)
+            if start_entity:
+                _empire_id = start_entity.empire_id
+        except Exception:
+            pass
 
         for depth in range(1, max_depth + 1):
             next_ids = []
@@ -299,22 +303,18 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
                         next_ids.append(neighbor_id)
                         neighbor_ids_to_fetch.append((neighbor_id, rel, depth))
 
-            # Batch fetch all neighbors at this depth, filtered by empire_id
+            # Batch fetch all neighbors at this depth to avoid N+1 queries
             if neighbor_ids_to_fetch:
                 neighbor_ids = [nid for nid, _, _ in neighbor_ids_to_fetch]
-                stmt = (
-                    select(KnowledgeEntity)
-                    .where(and_(
-                        KnowledgeEntity.id.in_(neighbor_ids),
-                        KnowledgeEntity.empire_id == empire_id,
-                    ))
-                )
-                neighbors = list(self.session.execute(stmt).scalars().all())
+                neighbors = self.get_many(neighbor_ids)
                 neighbors_by_id = {n.id: n for n in neighbors}
 
                 for neighbor_id, rel, depth_val in neighbor_ids_to_fetch:
                     neighbor = neighbors_by_id.get(neighbor_id)
                     if neighbor:
+                        # Filter out entities from other empires
+                        if isinstance(_empire_id, str) and getattr(neighbor, "empire_id", None) != _empire_id:
+                            continue
                         results.append({
                             "entity": neighbor,
                             "relation": rel,
@@ -423,39 +423,17 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
         limit: int = 10,
         min_similarity: float = 0.5,
     ) -> list[dict]:
-        """Find entities similar to a given embedding.
+        """Find entities similar to a given embedding using cosine similarity.
 
-        Uses Qdrant when available for sub-millisecond ANN search,
-        falls back to in-memory cosine similarity over SQL rows.
+        Args:
+            embedding: Query embedding vector.
+            empire_id: Empire ID.
+            limit: Maximum results.
+            min_similarity: Minimum cosine similarity threshold.
+
+        Returns:
+            List of {entity, similarity} dicts.
         """
-        # ── Try Qdrant first ──────────────────────────────────────
-        try:
-            from core.vector.store import VectorStore
-            vs = VectorStore.get_instance(empire_id)
-            if vs.enabled:
-                hits = vs.search_entities(
-                    embedding=embedding,
-                    empire_id=empire_id,
-                    limit=limit,
-                    min_score=min_similarity,
-                )
-                if hits:
-                    entity_ids = [h["entity_id"] for h in hits]
-                    score_map = {h["entity_id"]: h["score"] for h in hits}
-                    entries = list(self.session.execute(
-                        select(KnowledgeEntity).where(KnowledgeEntity.id.in_(entity_ids))
-                    ).scalars().all())
-                    entry_map = {e.id: e for e in entries}
-                    results = []
-                    for eid in entity_ids:
-                        entry = entry_map.get(eid)
-                        if entry:
-                            results.append({"entity": entry, "similarity": score_map[eid]})
-                    return results
-        except Exception as e:
-            logger.debug("Qdrant entity search unavailable, falling back to SQL: %s", e)
-
-        # ── Fallback: in-memory cosine similarity ─────────────────
         stmt = (
             select(KnowledgeEntity)
             .where(and_(

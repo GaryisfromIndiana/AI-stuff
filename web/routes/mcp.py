@@ -34,7 +34,8 @@ def mcp_status():
         })
     except Exception as e:
         logger.error("MCP status error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @mcp_bp.route("/connect", methods=["POST"])
@@ -74,7 +75,8 @@ def connect_server():
             })
     except Exception as e:
         logger.error("MCP connect error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @mcp_bp.route("/disconnect", methods=["POST"])
@@ -96,7 +98,8 @@ def disconnect_server():
             return jsonify({"disconnected": "all"})
     except Exception as e:
         logger.error("MCP disconnect error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @mcp_bp.route("/tools")
@@ -121,7 +124,8 @@ def list_tools():
         })
     except Exception as e:
         logger.error("MCP tools list error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @mcp_bp.route("/call", methods=["POST"])
@@ -152,7 +156,8 @@ def call_tool():
         })
     except Exception as e:
         logger.error("MCP tool call error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @mcp_bp.route("/add", methods=["POST"])
@@ -196,4 +201,5 @@ def add_server():
         return jsonify({"added": name})
     except Exception as e:
         logger.error("MCP add server error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500

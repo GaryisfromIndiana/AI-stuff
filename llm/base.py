@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -222,6 +223,8 @@ class LLMClient(ABC):
     """Abstract base class for LLM providers."""
 
     provider_name: str = "base"
+    _default_model: str = ""
+    _max_retries: int = 5
 
     def __init__(self):
         self._rate_limiter = RateLimiter()
@@ -230,16 +233,61 @@ class LLMClient(ABC):
         self._total_cost = 0.0
         self._errors = 0
 
-    @abstractmethod
     def complete(self, request: LLMRequest) -> LLMResponse:
-        """Send a completion request and return the response.
+        """Send a completion request with automatic retries and rate limiting.
 
-        Args:
-            request: The LLM request.
-
-        Returns:
-            LLM response.
+        Subclasses implement _call_provider, _parse_response, and _classify_error
+        instead of overriding this method directly.
         """
+        model = request.model or self._default_model
+        self._wait_for_rate_limit(request)
+
+        start_time = time.time()
+        last_error = None
+
+        for attempt in range(self._max_retries):
+            try:
+                raw = self._call_provider(request, model)
+                latency_ms = (time.time() - start_time) * 1000
+                response = self._parse_response(raw, model, latency_ms)
+                self._record_usage(response)
+                return response
+            except Exception as e:
+                retry_wait = self._classify_error(e, attempt)
+                if retry_wait is not None:
+                    last_error = e
+                    time.sleep(retry_wait)
+                else:
+                    self._errors += 1
+                    raise
+
+        self._errors += 1
+        raise last_error or RuntimeError("Failed after retries")
+
+    def _wait_for_rate_limit(self, request: LLMRequest) -> None:
+        """Block until the rate limiter allows the request."""
+        estimated_tokens = sum(len(m.content) // 4 for m in request.messages) + request.max_tokens
+        while not self._rate_limiter.can_proceed(estimated_tokens):
+            wait = self._rate_limiter.wait_time()
+            if wait > 0:
+                logger.debug("Rate limit backpressure: waiting %.1fs", wait)
+                time.sleep(min(wait, 5.0))
+            else:
+                break
+
+    @abstractmethod
+    def _call_provider(self, request: LLMRequest, model: str) -> Any:
+        """Build kwargs and call the provider API. Returns the raw SDK response."""
+        ...
+
+    @abstractmethod
+    def _parse_response(self, raw: Any, model: str, latency_ms: float) -> LLMResponse:
+        """Parse a raw provider response into an LLMResponse."""
+        ...
+
+    @abstractmethod
+    def _classify_error(self, error: Exception, attempt: int) -> Optional[float]:
+        """Classify an error. Return wait seconds if retryable, None if fatal."""
         ...
 
     @abstractmethod

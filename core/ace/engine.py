@@ -12,11 +12,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from llm.base import LLMRequest, LLMResponse, LLMMessage, ToolDefinition
+from llm.base import LLMRequest, LLMResponse, LLMMessage
 from llm.router import ModelRouter, TaskMetadata
-from llm.schemas import PlanningOutput, CriticOutput, parse_llm_output
 from config.settings import get_settings
-from core.ace.tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +78,6 @@ class TaskResult:
     planning_output: dict = field(default_factory=dict)
     execution_output: dict = field(default_factory=dict)
     critic_output: dict = field(default_factory=dict)
-    editor_result: Optional[Any] = None  # EditorResult from the verification stage
 
     # Metrics
     model_used: str = ""
@@ -157,8 +154,6 @@ class ACEEngine:
         critic_model: str = "",
         max_iterations: int = 3,
         min_quality: float = 0.6,
-        empire_id: str = "",
-        lieutenant_id: str = "",
     ):
         self.router = router or ModelRouter()
         self._planning_model = planning_model
@@ -166,9 +161,6 @@ class ACEEngine:
         self._critic_model = critic_model
         self._max_iterations = max_iterations
         self._min_quality = min_quality
-        self._empire_id = empire_id
-        self._lieutenant_id = lieutenant_id
-        self._tool_registry: ToolRegistry | None = None
 
         # Load defaults from settings
         try:
@@ -184,19 +176,8 @@ class ACEEngine:
                 self._max_iterations = s.ace.max_pipeline_iterations
             if min_quality == 0.6:
                 self._min_quality = s.quality.min_confidence_score
-            if not self._empire_id:
-                self._empire_id = s.empire_id
         except Exception:
             pass
-
-        # Initialize tool registry (includes MCP tools)
-        try:
-            self._tool_registry = ToolRegistry(
-                empire_id=self._empire_id,
-                lieutenant_id=self._lieutenant_id,
-            )
-        except Exception as e:
-            logger.debug("Tool registry init failed (tools unavailable): %s", e)
 
     def execute_task(self, task: TaskInput, context: ACEContext | None = None) -> TaskResult:
         """Execute a single task through the full 3-agent pipeline.
@@ -236,39 +217,16 @@ class ACEEngine:
             result.tokens_input += execution.get("tokens", 0)
             result.model_used = execution.get("model", "")
 
-            if execution.get("error"):
-                result.error = execution["error"]
-                result.error_log.append(f"Execution error: {execution['error']}")
-
-            # ── Stage 2.5: Editor (fact extraction + verification) ────
-            editor_result = None
-            if result.content and len(result.content) >= 50:
-                editor_result = self._run_editor(task, execution)
-                result.cost_usd += editor_result.cost_usd if editor_result else 0.0
-                result.editor_result = editor_result
-
             # ── Stage 3: Critic loop ───────────────────────────────────
             critic_failures = 0
             for iteration in range(self._max_iterations):
                 result.pipeline_iterations = iteration + 1
 
-                critic_eval = self._run_critic(task, execution, system_prompt, editor_result=editor_result)
+                critic_eval = self._run_critic(task, execution, system_prompt)
                 result.critic_output = critic_eval
                 result.quality_score = critic_eval.get("overall_score", 0.0)
                 result.quality_details = critic_eval
                 result.cost_usd += critic_eval.get("cost", 0.0)
-
-                # Run quality gate chain with critic scores + editor verification
-                gate_result = self._run_quality_gates(result.content, critic_eval, editor_result)
-                if gate_result:
-                    result.quality_details["gates"] = gate_result.to_dict()
-                    # If gates fail, cap the quality score
-                    if not gate_result.passed and result.quality_score >= self._min_quality:
-                        logger.info(
-                            "Task %s: critic scored %.2f but gates failed (%s) — capping score",
-                            task.id, result.quality_score, gate_result.summary,
-                        )
-                        result.quality_score = min(result.quality_score, self._min_quality - 0.01)
 
                 # Check if quality is acceptable
                 if result.quality_score >= self._min_quality:
@@ -316,11 +274,6 @@ class ACEEngine:
                     result.content = execution.get("content", "")
                     result.cost_usd += execution.get("cost", 0.0)
 
-                    # Re-run editor on new execution
-                    if result.content and len(result.content) >= 50:
-                        editor_result = self._run_editor(task, execution)
-                        result.cost_usd += editor_result.cost_usd if editor_result else 0.0
-
             if not result.success and result.quality_score > 0:
                 # Accept with lower quality if we exhausted iterations
                 result.success = result.quality_score >= (self._min_quality * 0.7)
@@ -329,12 +282,6 @@ class ACEEngine:
                 "content": result.content,
                 "planning": result.planning_output,
                 "quality": result.quality_details,
-                "editor": {
-                    "total_claims": editor_result.total_claims,
-                    "supported": editor_result.supported_count,
-                    "contradicted": editor_result.contradicted_count,
-                    "unverifiable": editor_result.unverifiable_count,
-                } if editor_result else None,
             }
 
         except Exception as e:
@@ -501,25 +448,7 @@ Please produce an improved version addressing the feedback above.
 ## Instructions
 Execute the task thoroughly and produce high-quality output.
 Be specific, accurate, and comprehensive.
-
-**Source citation requirements** (IMPORTANT):
-- For every key claim, include an inline source reference: (Source: <name>) or [<URL>]
-- When you get data from a tool, attribute it: e.g. "(Source: HuggingFace model card)",
-  "(Source: GitHub README)", "(Source: Tavily search)"
-- At the end of your response, include a "## Sources" section listing all sources used
-- Claims without sources will be flagged by the quality system
-"""
-
-        # Add tool usage instructions if tools are available
-        tool_definitions = []
-        if self._tool_registry:
-            tool_definitions = self._tool_registry.get_definitions()
-            if tool_definitions:
-                exec_prompt += f"""
-You have {len(tool_definitions)} tools available. Use them to gather information,
-search the web, recall memories, look up knowledge, and interact with external systems.
-Call tools when you need real data — don't guess or hallucinate facts.
-When you use a tool, note which tool/source provided the data so you can cite it.
+Cite sources or reasoning where applicable.
 """
 
         model = task.model_override or self._execution_model
@@ -536,108 +465,24 @@ When you use a tool, note which tool/source provided the data so you can cite it
                 system_prompt=system_prompt,
                 temperature=0.7,
                 max_tokens=task.max_tokens,
-                tools=tool_definitions,
-                tool_choice="auto" if tool_definitions else None,
             )
-
-            decision = self.router.route(metadata)
-            request.model = decision.model_config.model_id
-            client = self.router.get_client(decision.provider)
-
-            # Use complete_with_tools for automatic tool execution loop
-            if tool_definitions and self._tool_registry:
-                response = client.complete_with_tools(
-                    request,
-                    tool_executor=self._tool_registry.execute_tool_call,
-                    max_rounds=8,
-                )
-            else:
-                response = client.complete(request)
-
-            self.router._record_cost(response, decision.model_key, decision.provider)
-
-            logger.info(
-                "Execution complete: content_len=%d, tool_calls=%d, cost=%.4f",
-                len(response.content),
-                len(response.tool_calls) if response.tool_calls else 0,
-                response.cost_usd,
-            )
+            response = self.router.execute(request, metadata)
 
             return {
                 "content": response.content,
                 "model": response.model,
                 "tokens": response.total_tokens,
                 "cost": response.cost_usd,
-                "tool_calls_made": len(response.tool_calls) if response.tool_calls else 0,
-                "tool_log": response.tool_log,
             }
         except Exception as e:
-            logger.exception("Execution failed: %s", e)
+            logger.error("Execution failed: %s", e)
             return {"content": "", "error": str(e)}
-
-    def _run_editor(self, task: TaskInput, execution: dict):
-        """Run the Editor stage to extract and verify facts."""
-        try:
-            from core.ace.editor import Editor
-            editor = Editor(
-                router=self.router,
-                tool_registry=self._tool_registry,
-                empire_id=self._empire_id,
-            )
-            result = editor.run(
-                content=execution.get("content", ""),
-                tool_log=execution.get("tool_log", []),
-                task_title=task.title,
-            )
-            logger.info(
-                "Editor: %d claims, %d supported, %d contradicted, %d unverifiable",
-                result.total_claims, result.supported_count,
-                result.contradicted_count, result.unverifiable_count,
-            )
-            return result
-        except Exception as e:
-            logger.warning("Editor stage failed (continuing without): %s", e)
-            return None
-
-    def _run_quality_gates(self, content: str, critic_eval: dict, editor_result=None):
-        """Run the quality gate chain using critic scores and editor verification."""
-        try:
-            from core.ace.quality_gates import QualityGateChain
-
-            chain = QualityGateChain.from_settings()
-
-            # Build context from critic scores
-            context = {
-                "overall_score": critic_eval.get("overall_score", 0.0),
-                "confidence": critic_eval.get("confidence", 0.0),
-                "completeness": critic_eval.get("completeness", 0.0),
-                "coherence": critic_eval.get("coherence", 0.0),
-                "accuracy": critic_eval.get("accuracy", 0.0),
-            }
-
-            # Feed editor verification into the hallucination gate
-            if editor_result and editor_result.total_claims > 0:
-                contradicted_rate = editor_result.contradicted_count / editor_result.total_claims
-                context["hallucination_score"] = contradicted_rate
-                context["unsupported_claims"] = [
-                    c.claim for c in editor_result.claims
-                    if c.verification_status == "contradicted"
-                ]
-
-            gate_result = chain.run(content, context)
-            logger.info("Quality gates: %s", gate_result.summary)
-            return gate_result
-
-        except Exception as e:
-            logger.warning("Quality gate chain failed: %s", e)
-            return None
 
     def _run_critic(
         self,
         task: TaskInput,
         execution: dict,
         system_prompt: str,
-        editor_result=None,
     ) -> dict:
         """Run the critic agent to evaluate the output quality."""
         content = execution.get("content", "")
@@ -649,19 +494,7 @@ When you use a tool, note which tool/source provided the data so you can cite it
                 "suggestions": ["Retry execution"],
             }
 
-        from datetime import datetime, timezone
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
         critic_prompt = f"""You are the CRITIC agent in a 3-agent pipeline.
-
-## Important Context
-- Today's date is **{today}**.
-- The output was generated by an AI research lieutenant that used **live tools**
-  (web search, HuggingFace API, GitHub API, URL fetching) to gather real-time data.
-- Facts about model releases, benchmarks, and download counts reflect the current
-  state of the world, NOT the critic's training data. Do NOT penalize claims about
-  events after your knowledge cutoff — the research agent has access to live data
-  that you do not.
 
 ## Original Task
 Title: {task.title}
@@ -671,23 +504,15 @@ Requirements: {', '.join(task.requirements) if task.requirements else 'None spec
 ## Output to Evaluate
 {content[:6000]}
 
-## Fact Verification (from Editor stage)
-{editor_result.to_critic_summary() if editor_result else "Editor stage was not run — evaluate factuality based on internal consistency only."}
-
 ## Instructions
 Evaluate the output quality on these dimensions (score 0.0 to 1.0):
-1. **Confidence** — Does the output back up its claims with data, sources, or citations?
-   Score based on HOW WELL claims are attributed, not whether YOU recognize the sources.
-   Inline citations like "(Source: HuggingFace)" or URLs count. A ## Sources section counts.
-   Score 0.7+ if most key claims have source attribution.
+1. **Confidence** — How confident is the output in its claims?
 2. **Completeness** — Does it address all requirements?
 3. **Coherence** — Is it logically consistent and well-structured?
-4. **Accuracy** — Is the reasoning sound? Are claims internally consistent?
-   (Do NOT mark down for mentioning models or events you haven't heard of —
-   the research agent has access to live data that you do not.)
+4. **Accuracy** — Are the facts and reasoning sound?
 
 Also identify:
-- Any issues or problems (structural, logical, or missing coverage — NOT unfamiliarity)
+- Any issues or problems
 - Specific suggestions for improvement
 - Whether you approve the output
 
@@ -722,18 +547,9 @@ Respond as JSON:
             response = self.router.execute(request, metadata)
 
             # Parse the JSON response directly — the prompt asks for flat fields
-            import json
-            from llm.schemas import _find_json_object
+            from llm.schemas import safe_json_loads
 
-            raw = response.content
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                json_str = _find_json_object(raw)
-                if json_str:
-                    data = json.loads(json_str)
-                else:
-                    data = {}
+            data = safe_json_loads(response.content)
 
             if data:
                 return {

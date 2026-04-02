@@ -1010,3 +1010,49 @@ class CrossEmpireSync(Base):
 
     def __repr__(self) -> str:
         return f"<CrossEmpireSync(source={self.source_empire_id!r}, target={self.target_empire_id!r}, type={self.sync_type!r})>"
+
+
+class GodPanelCommand(Base):
+    """A God Panel command with its execution state."""
+
+    __tablename__ = "god_panel_commands"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True)
+    empire_id: Mapped[str] = mapped_column(String(32), ForeignKey("empires.id", ondelete="CASCADE"), nullable=False)
+    command: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    topic: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="accepted")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    result_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_gpc_empire_id", "empire_id"),
+        Index("ix_gpc_status", "status"),
+        Index("ix_gpc_started_at", "started_at"),
+        CheckConstraint(
+            "status IN ('accepted', 'running', 'researching', 'completed', 'failed')",
+            name="ck_gpc_status",
+        ),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "command": self.command,
+            "action": self.action,
+            "topic": self.topic,
+            "status": self.status,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "result": self.result_json,
+            "error": self.error,
+            "cost": self.cost_usd,
+        }
+
+    def __repr__(self) -> str:
+        return f"<GodPanelCommand(id={self.id!r}, action={self.action!r}, status={self.status!r})>"

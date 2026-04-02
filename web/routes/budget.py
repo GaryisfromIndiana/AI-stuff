@@ -47,17 +47,14 @@ def daily_spend():
     """Get daily spend data."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
     try:
-        from db.engine import get_session
+        from db.engine import repo_scope
         from db.repositories.empire import EmpireRepository
-        session = get_session()
-        try:
-            repo = EmpireRepository(session)
-            daily = repo.get_daily_spend(empire_id, days=30)
-            return jsonify(daily)
-        finally:
-            session.close()
+
+        with repo_scope(EmpireRepository) as repo:
+            return jsonify(repo.get_daily_spend(empire_id, days=30))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @budget_bp.route("/by-model")
@@ -97,4 +94,5 @@ def cost_optimization():
             "suggestion": "Use cheaper models for simple tasks, premium models only for complex analysis",
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500

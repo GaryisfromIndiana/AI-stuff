@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -160,12 +159,8 @@ Respond as JSON:
                 ]
             else:
                 # Try raw JSON parse
-                try:
-                    data = json.loads(response.content)
-                except json.JSONDecodeError:
-                    from llm.schemas import _find_json_object
-                    json_str = _find_json_object(response.content)
-                    data = json.loads(json_str) if json_str else {}
+                from llm.schemas import safe_json_loads
+                data = safe_json_loads(response.content)
 
                 entities = data.get("entities", [])[:max_entities]
                 relations = data.get("relations", [])

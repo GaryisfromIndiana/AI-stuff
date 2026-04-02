@@ -84,6 +84,27 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(god_panel_bp, url_prefix="/god")
     app.register_blueprint(mcp_bp, url_prefix="/mcp")
 
+    # ── CSRF protection for session-authenticated API calls ───────
+    @app.after_request
+    def set_csrf_headers(response):
+        # Disallow embedding in iframes and restrict cross-origin requests
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @app.before_request
+    def csrf_check():
+        """Block cross-origin state-changing requests that rely on session cookies."""
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        origin = request.headers.get("Origin", "")
+        if origin and not origin.startswith(request.host_url.rstrip("/")):
+            # Allow if using API key auth (not session-based)
+            if request.headers.get("X-API-Key"):
+                return None
+            return jsonify({"error": "Cross-origin requests not allowed"}), 403
+        return None
+
     # ── Authentication ──────────────────────────────────────────────
     from web.middleware.auth import require_login, require_api_auth, _is_auth_enabled, _check_password, _get_auth_config
 
@@ -171,17 +192,21 @@ def create_app(config: dict | None = None) -> Flask:
         logger.error("Server error: %s", e)
         return {"error": "Internal server error"}, 500
 
-    # Always start the scheduler daemon. The thread is daemonic so if
-    # Flask's reloader restarts the process the old thread dies with it.
-    try:
-        from core.scheduler.daemon import SchedulerDaemon
-        empire_id = app.config.get("EMPIRE_ID", "")
-        daemon = SchedulerDaemon(empire_id, tick_interval=100)  # 100s ticks
-        app.config["_SCHEDULER_DAEMON"] = daemon
-        daemon.start()
-        logger.info("Scheduler daemon STARTED (100s ticks, %d jobs)", len(daemon._jobs))
-    except Exception:
-        logger.exception("SCHEDULER FAILED TO START")
+    # Start scheduler daemon in every worker. The advisory lock in tick()
+    # ensures only one worker runs jobs per tick (on Postgres). On SQLite
+    # it's fine — only one process runs anyway.
+    import os
+    is_worker = os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG")
+    if is_worker:
+        try:
+            from core.scheduler.daemon import SchedulerDaemon
+            empire_id = app.config.get("EMPIRE_ID", "")
+            daemon = SchedulerDaemon(empire_id, tick_interval=300)  # 5 min ticks
+            app.config["_SCHEDULER_DAEMON"] = daemon
+            daemon.start()
+            logger.info("Scheduler daemon STARTED (5 min ticks, %d jobs)", len(daemon._jobs))
+        except Exception as e:
+            logger.warning("Could not create scheduler: %s", e)
 
     logger.info("Empire web app created: %s", settings.empire_name)
     return app

@@ -289,7 +289,6 @@ Return ONLY the JSON array, no other text."""
                     raw = raw[4:]
                 raw = raw.strip()
 
-            from llm.schemas import _find_json_object
             # Try direct parse first
             try:
                 data = json.loads(raw)

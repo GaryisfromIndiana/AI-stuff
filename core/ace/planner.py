@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from llm.base import LLMRequest, LLMMessage
 from llm.router import ModelRouter, TaskMetadata
-from llm.schemas import PlanningOutput, parse_llm_output
+from llm.schemas import PlanningOutput, parse_llm_output, safe_json_loads
 
 logger = logging.getLogger(__name__)
 
@@ -199,12 +198,7 @@ Respond as JSON:
             )
             response = self.router.execute(request, TaskMetadata(task_type="planning"))
 
-            try:
-                data = json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                data = json.loads(json_str) if json_str else {"subtasks": []}
+            data = safe_json_loads(response.content, default={"subtasks": []})
 
             return [
                 SubTask(

@@ -152,12 +152,8 @@ Respond as JSON:
             )
             response = router.execute(request, TaskMetadata(task_type="analysis", complexity="complex"))
 
-            try:
-                data = json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                data = json.loads(json_str) if json_str else {}
+            from llm.schemas import safe_json_loads
+            data = safe_json_loads(response.content)
 
             return Synthesis(
                 summary=data.get("summary", ""),
@@ -231,12 +227,8 @@ Respond as JSON:
             )
             response = router.execute(request, TaskMetadata(task_type="planning", complexity="complex"))
 
-            try:
-                data = json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                data = json.loads(json_str) if json_str else {}
+            from llm.schemas import safe_json_loads
+            data = safe_json_loads(response.content)
 
             total_tasks = sum(len(w.get("tasks", [])) for w in data.get("waves", []))
 
@@ -351,12 +343,8 @@ Respond as JSON:
             )
             response = router.execute(request, TaskMetadata(task_type="analysis"))
 
-            try:
-                data = json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                data = json.loads(json_str) if json_str else {}
+            from llm.schemas import safe_json_loads
+            data = safe_json_loads(response.content)
 
             return ExecutiveSummary(
                 headline=data.get("headline", ""),

@@ -29,11 +29,10 @@ def list_proposals():
     empire_id = current_app.config.get("EMPIRE_ID", "")
     status_filter = request.args.get("status")
     try:
-        from db.engine import get_session
+        from db.engine import repo_scope
         from db.repositories.evolution import EvolutionRepository
-        session = get_session()
-        try:
-            repo = EvolutionRepository(session)
+
+        with repo_scope(EvolutionRepository) as repo:
             proposals = repo.get_by_empire(empire_id, status=status_filter)
             return render_template("evolution/proposals.html", proposals=[
                 {"id": p.id, "title": p.title, "type": p.proposal_type, "status": p.review_status,
@@ -41,8 +40,6 @@ def list_proposals():
                  "created_at": p.created_at.isoformat() if p.created_at else None}
                 for p in proposals
             ])
-        finally:
-            session.close()
     except Exception as e:
         return render_template("evolution/proposals.html", proposals=[], error=str(e))
 
@@ -63,7 +60,8 @@ def run_cycle():
             "learnings": result.learnings,
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @evolution_bp.route("/stats")
@@ -81,14 +79,11 @@ def evolution_trend():
     """Get improvement trend data."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
     try:
-        from db.engine import get_session
+        from db.engine import repo_scope
         from db.repositories.evolution import EvolutionRepository
-        session = get_session()
-        try:
-            repo = EvolutionRepository(session)
-            trend = repo.get_improvement_trend(empire_id)
-            return jsonify(trend)
-        finally:
-            session.close()
+
+        with repo_scope(EvolutionRepository) as repo:
+            return jsonify(repo.get_improvement_trend(empire_id))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500

@@ -289,12 +289,8 @@ Respond as JSON:
             response = router.execute(request, TaskMetadata(task_type="analysis"))
             self._total_cost += response.cost_usd
 
-            try:
-                data = json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                data = json.loads(json_str) if json_str else {}
+            from llm.schemas import safe_json_loads
+            data = safe_json_loads(response.content)
 
             # Create action items
             for item in data.get("action_items", []):
@@ -414,16 +410,10 @@ Respond as JSON:
             response = router.execute(request, TaskMetadata(task_type="analysis"))
             self._total_cost += response.cost_usd
 
-            from llm.schemas import _find_json_object, _extract_json_block
+            from llm.schemas import safe_json_loads
             raw = response.content
-            # Try direct parse, then markdown block, then find object
-            for attempt_str in [raw, _extract_json_block(raw), _find_json_object(raw)]:
-                if attempt_str:
-                    try:
-                        return json.loads(attempt_str)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-            return {"summary": raw, "waves": []}
+            data = safe_json_loads(raw)
+            return data if data else {"summary": raw, "waves": []}
 
         except Exception as e:
             return {"summary": f"Synthesis failed: {e}", "decisions": [], "dissenting_views": []}
@@ -475,16 +465,10 @@ Respond as JSON:
             response = router.execute(request, TaskMetadata(task_type="planning"))
             self._total_cost += response.cost_usd
 
-            from llm.schemas import _find_json_object, _extract_json_block
+            from llm.schemas import safe_json_loads
             raw = response.content
-            # Try direct parse, then markdown block, then find object
-            for attempt_str in [raw, _extract_json_block(raw), _find_json_object(raw)]:
-                if attempt_str:
-                    try:
-                        return json.loads(attempt_str)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-            return {"summary": raw, "waves": []}
+            data = safe_json_loads(raw)
+            return data if data else {"summary": raw, "waves": []}
 
         except Exception as e:
             return {"summary": f"Plan synthesis failed: {e}"}
@@ -536,3 +520,136 @@ Respond as JSON:
 
         except Exception as e:
             logger.error("Failed to persist war room: %s", e)
+
+
+def run_autonomous_debate(empire_id: str) -> dict:
+    """Auto-detect a cross-domain topic from recent research and run a lieutenant debate.
+
+    Flow:
+    1. Find recent high-importance research across domains
+    2. Use LLM to identify a debate-worthy topic
+    3. Spin up a war room with relevant lieutenants
+    4. Store the synthesis as bi-temporal + experiential memories
+
+    Called by the scheduler's autonomous_warroom job and the God Panel's
+    auto-detect warroom trigger.
+    """
+    import json
+    from core.memory.manager import MemoryManager
+    from core.memory.bitemporal import BiTemporalMemory
+    from db.engine import read_session, get_session
+    from db.repositories.lieutenant import LieutenantRepository
+    from db.models import _generate_id
+
+    mm = MemoryManager(empire_id)
+
+    # 1. Gather recent high-importance memories
+    recent = mm.recall(memory_types=["semantic"], limit=30)
+    if len(recent) < 5:
+        return {"skipped": True, "reason": "Not enough semantic memories for debate"}
+
+    recent_titles = [m.get("title", m.get("content", "")[:80]) for m in recent[:20]]
+    recent_block = "\n".join(f"- {t}" for t in recent_titles)
+
+    # 2. Ask LLM to pick a debate-worthy topic
+    from llm.router import ModelRouter, TaskMetadata
+    from llm.base import LLMRequest, LLMMessage
+
+    router = ModelRouter(empire_id)
+
+    topic_prompt = (
+        "You are the War Room Director for an autonomous AI research system.\n"
+        "Below are recent research findings stored in Empire's memory:\n\n"
+        f"{recent_block}\n\n"
+        "Identify ONE topic where multiple AI research domains would have "
+        "genuinely different perspectives worth debating. The topic should be:\n"
+        "- Timely and based on the recent findings above\n"
+        "- Controversial or multi-faceted (not a settled fact)\n"
+        "- Relevant to at least 3 of these domains: models, research, agents, tooling, industry, open_source\n\n"
+        "Respond with EXACTLY this JSON:\n"
+        '{"topic": "the debate topic as a question", '
+        '"context": "1-2 sentences of context from the findings", '
+        '"domains": ["domain1", "domain2", "domain3"]}'
+    )
+
+    resp = router.execute(
+        LLMRequest(messages=[LLMMessage.user(topic_prompt)], max_tokens=300, temperature=0.7),
+        TaskMetadata(task_type="planning", complexity="simple"),
+    )
+
+    from llm.schemas import safe_json_loads
+    plan = safe_json_loads(resp.content)
+    if not plan:
+        return {"error": "Failed to parse debate topic"}
+
+    debate_topic = plan.get("topic", "")
+    debate_context = plan.get("context", "")
+    debate_domains = plan.get("domains", [])
+
+    if not debate_topic or len(debate_domains) < 2:
+        return {"skipped": True, "reason": "No suitable debate topic found"}
+
+    # 3. Create war room session with relevant lieutenants
+    session_db = get_session()
+    try:
+        lt_repo = LieutenantRepository(session_db)
+        all_lts = lt_repo.get_by_empire(empire_id, status="active")
+
+        war_room = WarRoomSession(
+            session_id=_generate_id(),
+            empire_id=empire_id,
+            session_type="autonomous_debate",
+        )
+
+        added = 0
+        for lt in all_lts:
+            if lt.domain in debate_domains:
+                war_room.add_participant(lt.id, lt.name, lt.domain)
+                added += 1
+
+        if added < 2:
+            return {"skipped": True, "reason": f"Only {added} lieutenant(s) matched domains"}
+
+        # 4. Run the debate
+        logger.info("Autonomous war room: '%s' with %d lieutenants", debate_topic[:60], added)
+        result = war_room.start_debate(debate_topic, context=debate_context)
+
+        # 5. Store synthesis
+        synthesis = result.get("synthesis", {})
+        synthesis_text = ""
+        if isinstance(synthesis, dict):
+            synthesis_text = synthesis.get("synthesis", "") or synthesis.get("summary", "") or str(synthesis)
+        elif isinstance(synthesis, str):
+            synthesis_text = synthesis
+
+        if synthesis_text:
+            bt = BiTemporalMemory(empire_id)
+            bt.store_smart(
+                content=f"War Room Debate: {debate_topic}\n\n{synthesis_text[:2000]}",
+                title=f"Debate: {debate_topic[:60]}",
+                category="warroom_synthesis",
+                importance=0.8,
+                tags=["warroom", "debate", "autonomous"] + debate_domains,
+            )
+
+            decisions = result.get("synthesis", {}).get("decisions", []) if isinstance(result.get("synthesis"), dict) else []
+            if decisions:
+                mm.store(
+                    content=f"Debate decisions on '{debate_topic}':\n" + "\n".join(f"- {d}" for d in decisions[:5]),
+                    memory_type="experiential",
+                    title=f"Debate lesson: {debate_topic[:50]}",
+                    category="warroom_decision",
+                    importance=0.75,
+                    tags=["warroom", "decision", "autonomous"],
+                )
+
+        return {
+            "topic": debate_topic,
+            "participants": added,
+            "contributions": result.get("participant_count", 0),
+            "decisions": len(result.get("synthesis", {}).get("decisions", [])) if isinstance(result.get("synthesis"), dict) else 0,
+            "domains": debate_domains,
+        }
+
+    finally:
+        session_db.close()

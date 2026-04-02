@@ -45,23 +45,18 @@ class EvolutionCycleManager:
 
     def __init__(self, empire_id: str = ""):
         self.empire_id = empire_id
-        self._repo = None
-
-    def _get_repo(self):
-        """Get a fresh repository with its own session."""
-        from db.engine import get_session
-        from db.repositories.evolution import EvolutionRepository
-        return EvolutionRepository(get_session())
 
     def should_run_cycle(self) -> bool:
         """Check if a new cycle should be started."""
-        repo = self._get_repo()
+        from db.engine import repo_scope
+        from db.repositories.evolution import EvolutionRepository
         try:
             from config.settings import get_settings
             cooldown = get_settings().evolution.cooldown_hours
         except Exception:
             cooldown = 2
-        return repo.should_run_cycle(self.empire_id, cooldown)
+        with repo_scope(EvolutionRepository) as repo:
+            return repo.should_run_cycle(self.empire_id, cooldown)
 
     def run_full_cycle(self) -> CycleResult:
         """Run a complete evolution cycle.
@@ -74,65 +69,68 @@ class EvolutionCycleManager:
         Returns:
             CycleResult.
         """
+        from db.engine import repo_scope
+        from db.repositories.evolution import EvolutionRepository
+
         start_time = time.time()
         result = CycleResult()
 
-        repo = self._get_repo()
-        cycle = repo.create_cycle(self.empire_id)
-        result.cycle_id = cycle.id
+        with repo_scope(EvolutionRepository) as repo:
+            cycle = repo.create_cycle(self.empire_id)
+            result.cycle_id = cycle.id
 
-        logger.info("Starting evolution cycle %d for empire %s", cycle.cycle_number, self.empire_id)
+            logger.info("Starting evolution cycle %d for empire %s", cycle.cycle_number, self.empire_id)
 
-        # 1. Collect proposals
-        proposals = self._collect_proposals()
-        result.proposals_collected = len(proposals)
-        repo.update_cycle(cycle.id, status="reviewing", proposals_count=len(proposals))
-        repo.commit()
+            # 1. Collect proposals
+            proposals = self._collect_proposals()
+            result.proposals_collected = len(proposals)
+            repo.update_cycle(cycle.id, status="reviewing", proposals_count=len(proposals))
+            repo.commit()
 
-        # 2. Review proposals
-        reviewed = self._review_proposals(proposals)
-        approved = [r for r in reviewed if r.get("recommendation") == "approve"]
-        rejected = [r for r in reviewed if r.get("recommendation") == "reject"]
-        result.reviewed = len(reviewed)
-        result.approved = len(approved)
-        result.rejected = len(rejected)
+            # 2. Review proposals
+            reviewed = self._review_proposals(proposals)
+            approved = [r for r in reviewed if r.get("recommendation") == "approve"]
+            rejected = [r for r in reviewed if r.get("recommendation") == "reject"]
+            result.reviewed = len(reviewed)
+            result.approved = len(approved)
+            result.rejected = len(rejected)
 
-        repo.update_cycle(cycle.id, status="executing", approved_count=len(approved), rejected_count=len(rejected))
-        repo.commit()
+            repo.update_cycle(cycle.id, status="executing", approved_count=len(approved), rejected_count=len(rejected))
+            repo.commit()
 
-        # 3. Execute approved proposals
-        executed = self._execute_approved(approved)
-        result.applied = len(executed)
-        repo.update_cycle(cycle.id, applied_count=len(executed))
-        repo.commit()
+            # 3. Execute approved proposals
+            executed = self._execute_approved(approved)
+            result.applied = len(executed)
+            repo.update_cycle(cycle.id, applied_count=len(executed))
+            repo.commit()
 
-        # 4. Extract learnings
-        learnings = self._extract_learnings(proposals, reviewed, executed)
-        result.learnings = learnings
-        self._feed_back_to_memory(learnings)
+            # 4. Extract learnings
+            learnings = self._extract_learnings(proposals, reviewed, executed)
+            result.learnings = learnings
+            self._feed_back_to_memory(learnings)
 
-        # 5. Prompt evolution — improve lieutenant system prompts
-        try:
-            from core.evolution.prompt_evolution import PromptEvolver
-            evolver = PromptEvolver(self.empire_id)
-            evolved = evolver.evolve_all()
-            if evolved:
-                learnings.append(f"Evolved prompts for {len(evolved)} lieutenant(s): {', '.join(e.lieutenant_name for e in evolved)}")
-                logger.info("Prompt evolution: %d lieutenants evolved", len(evolved))
-        except Exception as e:
-            logger.warning("Prompt evolution failed: %s", e)
+            # 5. Prompt evolution — improve lieutenant system prompts
+            try:
+                from core.evolution.prompt_evolution import PromptEvolver
+                evolver = PromptEvolver(self.empire_id)
+                evolved = evolver.evolve_all()
+                if evolved:
+                    learnings.append(f"Evolved prompts for {len(evolved)} lieutenant(s): {', '.join(e.lieutenant_name for e in evolved)}")
+                    logger.info("Prompt evolution: %d lieutenants evolved", len(evolved))
+            except Exception as e:
+                logger.warning("Prompt evolution failed: %s", e)
 
-        # Complete cycle
-        result.duration_seconds = time.time() - start_time
-        repo.complete_cycle(cycle.id, learnings=learnings, summary=f"Cycle {cycle.cycle_number}: {result.applied}/{result.proposals_collected} proposals applied")
-        repo.commit()
+            # Complete cycle
+            result.duration_seconds = time.time() - start_time
+            repo.complete_cycle(cycle.id, learnings=learnings, summary=f"Cycle {cycle.cycle_number}: {result.applied}/{result.proposals_collected} proposals applied")
+            repo.commit()
 
-        logger.info(
-            "Evolution cycle %d complete: %d proposals, %d approved, %d applied",
-            cycle.cycle_number, result.proposals_collected, result.approved, result.applied,
-        )
+            logger.info(
+                "Evolution cycle %d complete: %d proposals, %d approved, %d applied",
+                cycle.cycle_number, result.proposals_collected, result.approved, result.applied,
+            )
 
-        return result
+            return result
 
     def _collect_proposals(self) -> list[dict]:
         """Collect improvement proposals from all lieutenants."""
@@ -151,16 +149,18 @@ class EvolutionCycleManager:
                         proposals.append(proposal)
 
                         # Save to DB
-                        repo = self._get_repo()
-                        repo.create(
-                            empire_id=self.empire_id,
-                            lieutenant_id=lt.id,
-                            title=proposal.get("title", "Untitled"),
-                            description=proposal.get("description", ""),
-                            proposal_type="optimization",
-                            confidence_score=proposal.get("confidence", 0.5),
-                        )
-                        repo.commit()
+                        from db.engine import repo_scope
+                        from db.repositories.evolution import EvolutionRepository
+                        with repo_scope(EvolutionRepository) as repo:
+                            repo.create(
+                                empire_id=self.empire_id,
+                                lieutenant_id=lt.id,
+                                title=proposal.get("title", "Untitled"),
+                                description=proposal.get("description", ""),
+                                proposal_type="optimization",
+                                confidence_score=proposal.get("confidence", 0.5),
+                            )
+                            repo.commit()
                 except Exception as e:
                     logger.warning("Failed to collect proposal from %s: %s", lt.name, e)
 
@@ -170,7 +170,6 @@ class EvolutionCycleManager:
         """Review proposals using an expert model."""
         from llm.base import LLMRequest, LLMMessage
         from llm.router import ModelRouter, TaskMetadata
-        import json
 
         router = ModelRouter()
         reviews = []
@@ -207,25 +206,23 @@ Respond as JSON:
                 )
                 response = router.execute(request, TaskMetadata(task_type="analysis", complexity="complex"))
 
-                try:
-                    review = json.loads(response.content)
-                except json.JSONDecodeError:
-                    from llm.schemas import _find_json_object
-                    json_str = _find_json_object(response.content)
-                    review = json.loads(json_str) if json_str else {"recommendation": "reject"}
+                from llm.schemas import safe_json_loads
+                review = safe_json_loads(response.content, default={"recommendation": "reject"})
 
                 review["proposal"] = proposal
                 reviews.append(review)
 
                 # Update proposal in DB
-                repo = self._get_repo()
-                pending = repo.get_pending(self.empire_id, limit=1)
-                if pending:
-                    if review.get("recommendation") == "approve":
-                        repo.approve_proposal(pending[0].id, notes=review.get("notes", ""), reviewer_model=response.model)
-                    else:
-                        repo.reject_proposal(pending[0].id, notes=review.get("notes", ""), reviewer_model=response.model)
-                    repo.commit()
+                from db.engine import repo_scope
+                from db.repositories.evolution import EvolutionRepository
+                with repo_scope(EvolutionRepository) as repo:
+                    pending = repo.get_pending(self.empire_id, limit=1)
+                    if pending:
+                        if review.get("recommendation") == "approve":
+                            repo.approve_proposal(pending[0].id, notes=review.get("notes", ""), reviewer_model=response.model)
+                        else:
+                            repo.reject_proposal(pending[0].id, notes=review.get("notes", ""), reviewer_model=response.model)
+                        repo.commit()
 
             except Exception as e:
                 logger.warning("Failed to review proposal: %s", e)
@@ -367,11 +364,9 @@ Respond as JSON:
             )
             response = router.execute(request, TaskMetadata(task_type="planning", complexity="simple"))
 
-            text = response.content
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                updates = json.loads(text[start:end])
+            from llm.schemas import safe_json_loads
+            updates = safe_json_loads(response.content)
+            if updates:
 
                 new_specs = updates.get("new_specializations", [])
                 if new_specs and isinstance(new_specs, list):
@@ -432,30 +427,34 @@ Respond as JSON:
 
     def get_cycle_history(self, limit: int = 10) -> list[dict]:
         """Get recent cycle history."""
-        repo = self._get_repo()
-        cycles = repo.get_cycle_history(self.empire_id, limit)
-        return [
-            {
-                "id": c.id,
-                "cycle_number": c.cycle_number,
-                "status": c.status,
-                "proposals": c.proposals_count,
-                "approved": c.approved_count,
-                "applied": c.applied_count,
-                "approval_rate": c.approval_rate,
-                "cost": c.total_cost_usd,
-                "completed_at": c.completed_at.isoformat() if c.completed_at else None,
-            }
-            for c in cycles
-        ]
+        from db.engine import repo_scope
+        from db.repositories.evolution import EvolutionRepository
+        with repo_scope(EvolutionRepository) as repo:
+            cycles = repo.get_cycle_history(self.empire_id, limit)
+            return [
+                {
+                    "id": c.id,
+                    "cycle_number": c.cycle_number,
+                    "status": c.status,
+                    "proposals": c.proposals_count,
+                    "approved": c.approved_count,
+                    "applied": c.applied_count,
+                    "approval_rate": c.approval_rate,
+                    "cost": c.total_cost_usd,
+                    "completed_at": c.completed_at.isoformat() if c.completed_at else None,
+                }
+                for c in cycles
+            ]
 
     def get_stats(self) -> CycleStats:
         """Get evolution statistics."""
-        repo = self._get_repo()
-        raw = repo.get_cycle_stats(self.empire_id)
-        return CycleStats(
-            total_cycles=raw.get("total_cycles", 0),
-            approval_rate=raw.get("avg_approval_rate", 0),
-            avg_proposals=raw.get("avg_proposals_per_cycle", 0),
-            total_cost=raw.get("total_cost", 0),
-        )
+        from db.engine import repo_scope
+        from db.repositories.evolution import EvolutionRepository
+        with repo_scope(EvolutionRepository) as repo:
+            raw = repo.get_cycle_stats(self.empire_id)
+            return CycleStats(
+                total_cycles=raw.get("total_cycles", 0),
+                approval_rate=raw.get("avg_approval_rate", 0),
+                avg_proposals=raw.get("avg_proposals_per_cycle", 0),
+                total_cost=raw.get("total_cost", 0),
+            )

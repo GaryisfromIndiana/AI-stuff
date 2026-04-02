@@ -8,6 +8,7 @@ from db.repositories.knowledge import KnowledgeRepository
 from db.repositories.memory import MemoryRepository
 from db.repositories.evolution import EvolutionRepository
 from db.repositories.empire import EmpireRepository
+from db.repositories.facts import FactsRepository
 
 __all__ = [
     "BaseRepository",
@@ -19,4 +20,5 @@ __all__ = [
     "MemoryRepository",
     "EvolutionRepository",
     "EmpireRepository",
+    "FactsRepository",
 ]

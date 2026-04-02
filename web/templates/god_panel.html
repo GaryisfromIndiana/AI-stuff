@@ -191,6 +191,12 @@ function executeCommand() {
     loadingDiv.textContent = 'Processing: "' + command + '"...';
     resultDiv.style.display = 'none';
 
+    function esc(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
     fetch('/god/command', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -202,28 +208,28 @@ function executeCommand() {
         resultDiv.style.display = 'block';
 
         let html = '<div style="margin-bottom: 0.5rem;">';
-        html += '<span class="badge badge-blue" style="font-size: 0.7rem;">' + (data.action || '?') + '</span> ';
-        html += '<span class="badge ' + (data.status === 'completed' ? 'badge-green' : 'badge-amber') + '" style="font-size: 0.7rem;">' + (data.status || '?') + '</span>';
+        html += '<span class="badge badge-blue" style="font-size: 0.7rem;">' + esc(data.action || '?') + '</span> ';
+        html += '<span class="badge ' + (data.status === 'completed' ? 'badge-green' : 'badge-amber') + '" style="font-size: 0.7rem;">' + esc(data.status || '?') + '</span>';
         if (data.cost) html += ' <span class="mono text-muted" style="font-size: 0.72rem;">$' + data.cost.toFixed(4) + '</span>';
         html += '</div>';
 
         if (data.synthesis) {
-            html += '<div style="white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5;">' + data.synthesis + '</div>';
+            html += '<div style="white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5;">' + esc(data.synthesis) + '</div>';
         } else if (data.directive_id) {
-            html += '<p>Directive <a href="/directives/' + data.directive_id + '">' + data.directive_id.slice(0,8) + '...</a> ' + (data.message || 'created') + '</p>';
+            html += '<p>Directive <a href="/directives/' + encodeURIComponent(data.directive_id) + '">' + esc(data.directive_id.slice(0,8)) + '...</a> ' + esc(data.message || 'created') + '</p>';
         } else if (data.health) {
-            html += '<p>Health: <strong>' + data.health.overall_status + '</strong></p>';
+            html += '<p>Health: <strong>' + esc(data.health.overall_status) + '</strong></p>';
             (data.health.checks || []).forEach(c => {
-                html += '<div style="font-size: 0.78rem; padding: 0.15rem 0;">' + c.name + ': ' + c.status + ' — ' + c.message + '</div>';
+                html += '<div style="font-size: 0.78rem; padding: 0.15rem 0;">' + esc(c.name) + ': ' + esc(c.status) + ' — ' + esc(c.message) + '</div>';
             });
         } else if (data.audit) {
-            html += '<p>Audited: ' + data.audit.audited + ', Flagged: ' + data.audit.flagged + ', Purged: ' + data.audit.purged + '</p>';
+            html += '<p>Audited: ' + esc(String(data.audit.audited)) + ', Flagged: ' + esc(String(data.audit.flagged)) + ', Purged: ' + esc(String(data.audit.purged)) + '</p>';
         } else if (data.research) {
-            html += '<p>Sources: ' + (data.research.sources || 0) + '</p>';
+            html += '<p>Sources: ' + esc(String(data.research.sources || 0)) + '</p>';
         } else if (data.error) {
-            html += '<p style="color: var(--rose);">Error: ' + data.error + '</p>';
+            html += '<p style="color: var(--rose);">Error: ' + esc(data.error) + '</p>';
         } else {
-            html += '<pre style="font-size: 0.75rem;">' + JSON.stringify(data, null, 2) + '</pre>';
+            html += '<pre style="font-size: 0.75rem;">' + esc(JSON.stringify(data, null, 2)) + '</pre>';
         }
 
         resultDiv.innerHTML = html;
@@ -232,7 +238,7 @@ function executeCommand() {
     .catch(err => {
         loadingDiv.style.display = 'none';
         resultDiv.style.display = 'block';
-        resultDiv.innerHTML = '<p style="color: var(--rose);">Error: ' + err.message + '</p>';
+        resultDiv.innerHTML = '<p style="color: var(--rose);">Error: ' + esc(err.message) + '</p>';
     });
 }
 

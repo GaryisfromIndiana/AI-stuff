@@ -76,29 +76,12 @@ class KnowledgeMaintainer:
     def __init__(self, empire_id: str = ""):
         self.empire_id = empire_id
         self._graph = None
-        self._repo = None
 
     def _get_graph(self):
         if self._graph is None:
             from core.knowledge.graph import KnowledgeGraph
             self._graph = KnowledgeGraph(self.empire_id)
         return self._graph
-
-    def _get_repo(self):
-        """Get a fresh repository with its own session.
-
-        IMPORTANT: Caller must close via repo.session.close() in a finally block.
-        """
-        from db.engine import get_session
-        from db.repositories.knowledge import KnowledgeRepository
-        return KnowledgeRepository(get_session())
-
-    def _close_repo(self, repo) -> None:
-        """Close the session owned by a repository."""
-        try:
-            repo.session.close()
-        except Exception:
-            pass
 
     def run_maintenance(self) -> KnowledgeReport:
         """Run full maintenance cycle.
@@ -161,8 +144,9 @@ class KnowledgeMaintainer:
         Returns:
             List of duplicate groups.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             entities = repo.get_by_empire(self.empire_id, limit=5000)
 
             # Group by normalized name
@@ -192,8 +176,6 @@ class KnowledgeMaintainer:
                     ))
 
             return duplicates
-        finally:
-            self._close_repo(repo)
 
     def merge_duplicates(self, groups: list[DuplicateGroup]) -> MergeResult:
         """Merge duplicate entity groups.
@@ -228,13 +210,12 @@ class KnowledgeMaintainer:
         Returns:
             Number of entities decayed.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             count = repo.decay_confidence(self.empire_id, days_threshold, rate)
             repo.commit()
             return count
-        finally:
-            self._close_repo(repo)
 
     def validate_relations(self) -> ValidationReport:
         """Check for broken or invalid relations.
@@ -242,8 +223,9 @@ class KnowledgeMaintainer:
         Returns:
             ValidationReport.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             from sqlalchemy import select
             from sqlalchemy.orm import joinedload
             from db.models import KnowledgeEntity
@@ -272,8 +254,6 @@ class KnowledgeMaintainer:
                         report.valid_relations += 1
 
             return report
-        finally:
-            self._close_repo(repo)
 
     def update_importance_scores(self) -> None:
         """Recalculate PageRank-style importance scores."""
@@ -294,8 +274,9 @@ class KnowledgeMaintainer:
             mm = MemoryManager(self.empire_id)
             sm = SemanticMemory(mm)
 
-            repo = self._get_repo()
-            try:
+            from db.engine import repo_scope
+            from db.repositories.knowledge import KnowledgeRepository
+            with repo_scope(KnowledgeRepository) as repo:
                 entities = repo.get_by_empire(self.empire_id, limit=100)
 
                 contradictions = []
@@ -308,8 +289,6 @@ class KnowledgeMaintainer:
                         ))
 
                 return contradictions
-            finally:
-                self._close_repo(repo)
         except Exception as e:
             logger.warning("Contradiction detection failed: %s", e)
             return []
@@ -402,11 +381,10 @@ class KnowledgeMaintainer:
         Returns:
             Audit results with purged/flagged entity counts.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             return self._deep_llm_audit_impl(repo, batch_size)
-        finally:
-            self._close_repo(repo)
 
     def _deep_llm_audit_impl(self, repo, batch_size: int) -> dict:
         entities = repo.get_by_empire(self.empire_id, limit=batch_size)
@@ -511,14 +489,13 @@ class KnowledgeMaintainer:
         Returns:
             List of spawn recommendations with topic, entity count, and suggested config.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             entities = repo.get_by_empire(self.empire_id, limit=5000)
 
             if not entities:
                 return []
-        finally:
-            self._close_repo(repo)
 
         # Get existing lieutenant domains
         try:

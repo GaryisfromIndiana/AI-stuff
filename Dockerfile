@@ -18,4 +18,4 @@ COPY . .
 
 # Startup: init DB, seed, launch gunicorn
 # Single worker to keep it simple and reliable
-CMD ["sh", "-c", "python -c 'from db.engine import init_db; init_db()' && python seed.py || echo 'Seed skipped'; exec gunicorn 'web.app:create_app()' -c gunicorn.conf.py"]
+CMD ["sh", "-c", "python -c 'from db.engine import init_db; init_db()' && python seed.py || echo 'Seed skipped'; exec gunicorn 'web.app:create_app' --factory -c gunicorn.conf.py"]

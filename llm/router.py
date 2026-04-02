@@ -68,62 +68,48 @@ class ModelHealth:
     total_errors: int = 0
 
 
-# Complexity → minimum tier mapping
-COMPLEXITY_TIER_MAP = {
-    "simple": 4,      # Flash/mini models
-    "moderate": 3,     # Haiku/mini models
-    "complex": 2,      # Sonnet/4o models
-    "expert": 1,       # Opus/o3 models
-}
+# ── Task Routing Table ────────────────────────────────────────────────────
+# Single source of truth for model selection.
+# Each task type maps to: model, tier, capabilities needed, and reason.
+#   - Haiku 4.5 (tier 3): cheap tasks (classification, extraction, tagging, routing)
+#   - Sonnet 4 (tier 2):  agent work (research, ACE pipeline, lieutenant tasks)
+#   - Opus 4 (tier 1):    heavy infra (synthesis, evolution, audits, planning)
 
-# Task type → preferred capabilities
-TASK_CAPABILITY_MAP = {
-    "research": ["reasoning", "analysis"],
-    "analysis": ["reasoning", "analysis"],
-    "code": ["code", "reasoning"],
-    "creative": ["creative", "reasoning"],
-    "extraction": ["analysis"],
-    "classification": ["analysis"],
-    "vision": ["vision"],
-    "math": ["math", "reasoning"],
-    "synthesis": ["reasoning", "analysis"],
-    "planning": ["reasoning", "analysis"],
-    "debate": ["reasoning", "creative"],
-    "evolution": ["reasoning", "code"],
-    "audit": ["reasoning", "analysis"],
-}
+@dataclass
+class TaskRouting:
+    """Routing config for a task type."""
+    model: str
+    tier: int
+    capabilities: list[str]
+    reason: str
 
-# ── Smart Model Tiering ──────────────────────────────────────────────────
-# Maps task types to their ideal model tier + preferred model.
-# This is the core routing intelligence:
-#   - Haiku 4.5: cheap tasks (classification, extraction, tagging, routing)
-#   - Sonnet 4:  agent work (research, ACE pipeline, lieutenant tasks)
-#   - Opus 4.6:  heavy infra (synthesis, evolution, audits, planning)
-
-TASK_MODEL_TIERS: dict[str, dict] = {
+TASK_ROUTING: dict[str, TaskRouting] = {
     # ── Haiku tier (cheap, fast) ─────────────────────────────
-    "classification": {"model": "claude-haiku-4.5", "tier": 3, "reason": "fast classification"},
-    "extraction": {"model": "claude-haiku-4.5", "tier": 3, "reason": "entity/attribute extraction"},
-    "tagging": {"model": "claude-haiku-4.5", "tier": 3, "reason": "simple tagging"},
-    "routing": {"model": "claude-haiku-4.5", "tier": 3, "reason": "command routing"},
-    "summarization": {"model": "claude-haiku-4.5", "tier": 3, "reason": "quick summarization"},
-    "formatting": {"model": "claude-haiku-4.5", "tier": 3, "reason": "text formatting"},
-
+    "classification": TaskRouting("claude-haiku-4.5", 3, ["analysis"], "fast classification"),
+    "extraction":     TaskRouting("claude-haiku-4.5", 3, ["analysis"], "entity/attribute extraction"),
+    "tagging":        TaskRouting("claude-haiku-4.5", 3, ["analysis"], "simple tagging"),
+    "routing":        TaskRouting("claude-haiku-4.5", 3, ["analysis"], "command routing"),
+    "summarization":  TaskRouting("claude-haiku-4.5", 3, ["analysis"], "quick summarization"),
+    "formatting":     TaskRouting("claude-haiku-4.5", 3, ["analysis"], "text formatting"),
     # ── Sonnet tier (agent work) ─────────────────────────────
-    "research": {"model": "claude-sonnet-4", "tier": 2, "reason": "research analysis"},
-    "analysis": {"model": "claude-sonnet-4", "tier": 2, "reason": "moderate analysis"},
-    "code": {"model": "claude-sonnet-4", "tier": 2, "reason": "code generation"},
-    "general": {"model": "claude-sonnet-4", "tier": 2, "reason": "general agent work"},
-    "creative": {"model": "claude-sonnet-4", "tier": 2, "reason": "creative generation"},
-    "debate": {"model": "claude-sonnet-4", "tier": 2, "reason": "war room debate"},
-
+    "research":       TaskRouting("claude-sonnet-4", 2, ["reasoning", "analysis"], "research analysis"),
+    "analysis":       TaskRouting("claude-sonnet-4", 2, ["reasoning", "analysis"], "moderate analysis"),
+    "code":           TaskRouting("claude-sonnet-4", 2, ["code", "reasoning"], "code generation"),
+    "general":        TaskRouting("claude-sonnet-4", 2, ["reasoning", "analysis"], "general agent work"),
+    "creative":       TaskRouting("claude-sonnet-4", 2, ["creative", "reasoning"], "creative generation"),
+    "debate":         TaskRouting("claude-sonnet-4", 2, ["reasoning", "creative"], "war room debate"),
+    "math":           TaskRouting("claude-sonnet-4", 2, ["math", "reasoning"], "mathematical reasoning"),
+    "vision":         TaskRouting("claude-sonnet-4", 2, ["vision"], "vision analysis"),
     # ── Opus tier (heavy infra) ──────────────────────────────
-    "synthesis": {"model": "claude-opus-4", "tier": 1, "reason": "deep synthesis"},
-    "evolution": {"model": "claude-opus-4", "tier": 1, "reason": "self-improvement proposals"},
-    "planning": {"model": "claude-opus-4", "tier": 1, "reason": "strategic planning"},
-    "audit": {"model": "claude-opus-4", "tier": 1, "reason": "deep knowledge audit"},
-    "expert": {"model": "claude-opus-4", "tier": 1, "reason": "expert-level reasoning"},
+    "synthesis":      TaskRouting("claude-opus-4", 1, ["reasoning", "analysis"], "deep synthesis"),
+    "evolution":      TaskRouting("claude-opus-4", 1, ["reasoning", "code"], "self-improvement proposals"),
+    "planning":       TaskRouting("claude-opus-4", 1, ["reasoning", "analysis"], "strategic planning"),
+    "audit":          TaskRouting("claude-opus-4", 1, ["reasoning", "analysis"], "deep knowledge audit"),
+    "expert":         TaskRouting("claude-opus-4", 1, ["reasoning", "analysis"], "expert-level reasoning"),
 }
+
+# Complexity → minimum tier (used in fallback scoring when task type isn't in TASK_ROUTING)
+COMPLEXITY_TIERS = {"simple": 4, "moderate": 3, "complex": 2, "expert": 1}
 
 
 class ModelRouter:
@@ -211,9 +197,9 @@ class ModelRouter:
             )
 
         # Smart tiering: check if task type has a pre-assigned model
-        tier_config = TASK_MODEL_TIERS.get(metadata.task_type)
-        if tier_config:
-            model_key = tier_config["model"]
+        task_routing = TASK_ROUTING.get(metadata.task_type)
+        if task_routing:
+            model_key = task_routing.model
             if model_key in MODEL_CATALOG:
                 config = MODEL_CATALOG[model_key]
                 if config.provider in self._clients:
@@ -224,7 +210,7 @@ class ModelRouter:
                             model_config=config,
                             provider=config.provider,
                             estimated_cost_usd=self._estimate_cost(config, metadata.estimated_tokens),
-                            reasoning=f"Tiered routing: {tier_config['reason']} → {model_key}",
+                            reasoning=f"Tiered routing: {task_routing.reason} → {model_key}",
                             fallback_model=self._find_fallback(model_key),
                         )
 
@@ -240,9 +226,6 @@ class ModelRouter:
         for key, config in candidates:
             score = self._score_candidate(key, config, metadata)
             scored.append((key, config, score))
-
-        if not scored:
-            raise ValueError("No models available for routing")
 
         # Sort by score (highest first)
         scored.sort(key=lambda x: x[2], reverse=True)
@@ -380,9 +363,7 @@ class ModelRouter:
 
             # Try fallback
             if decision.fallback_model:
-                fallback_config = MODEL_CATALOG.get(decision.fallback_model)
-                if not fallback_config:
-                    raise
+                fallback_config = MODEL_CATALOG[decision.fallback_model]
                 fallback_client = self.get_client(fallback_config.provider)
                 request.model = fallback_config.model_id
 
@@ -395,17 +376,19 @@ class ModelRouter:
                     self._update_health(decision.fallback_model, success=False)
                     logger.warning("Fallback model %s also failed: %s", decision.fallback_model, e2)
 
-            # Last resort: try any available model from all providers
+            # Last resort: try any available Anthropic model
             for key, config in MODEL_CATALOG.items():
-                if key == decision.model_key or key == decision.fallback_model:
+                if config.provider != "anthropic" or key == decision.model_key:
+                    continue
+                if key == decision.fallback_model:
                     continue
                 if config.provider not in self._clients:
                     continue
                 try:
                     request.model = config.model_id
-                    response = self._clients[config.provider].complete(request)
+                    response = self._clients["anthropic"].complete(request)
                     logger.info("Last-resort fallback to %s succeeded", key)
-                    self._record_cost(response, key, config.provider)
+                    self._record_cost(response, key, "anthropic")
                     return response
                 except Exception:
                     continue
@@ -417,12 +400,13 @@ class ModelRouter:
         metadata: TaskMetadata,
     ) -> list[tuple[str, LLMModelConfig]]:
         """Filter models by required capabilities and constraints."""
-        max_tier = COMPLEXITY_TIER_MAP.get(metadata.complexity, 3)
+        max_tier = COMPLEXITY_TIERS.get(metadata.complexity, 3)
         required_caps = set(metadata.required_capabilities)
 
-        # Add capabilities from task type
-        task_caps = TASK_CAPABILITY_MAP.get(metadata.task_type, [])
-        required_caps.update(task_caps)
+        # Add capabilities from task routing
+        task_routing = TASK_ROUTING.get(metadata.task_type)
+        if task_routing:
+            required_caps.update(task_routing.capabilities)
 
         if metadata.require_vision:
             required_caps.add("vision")
@@ -469,7 +453,7 @@ class ModelRouter:
         score = 0.0
 
         # Tier match (prefer the tier that matches complexity)
-        target_tier = COMPLEXITY_TIER_MAP.get(metadata.complexity, 3)
+        target_tier = COMPLEXITY_TIERS.get(metadata.complexity, 3)
         tier_diff = abs(config.tier - target_tier)
         score += max(0, 1.0 - tier_diff * 0.3)  # Penalize tier mismatch
 
@@ -495,7 +479,9 @@ class ModelRouter:
 
         # Capability coverage
         required = set(metadata.required_capabilities)
-        required.update(TASK_CAPABILITY_MAP.get(metadata.task_type, []))
+        task_routing = TASK_ROUTING.get(metadata.task_type)
+        if task_routing:
+            required.update(task_routing.capabilities)
         if required:
             coverage = len(required.intersection(set(config.capabilities))) / len(required)
             score += coverage * 0.3
@@ -546,13 +532,13 @@ class ModelRouter:
         """Return the current model tiering map for debugging/display."""
         self._init_clients()
         result = {}
-        for task_type, config in TASK_MODEL_TIERS.items():
-            model_key = config["model"]
-            available = model_key in MODEL_CATALOG and MODEL_CATALOG[model_key].provider in self._clients
+        for task_type, routing in TASK_ROUTING.items():
+            available = routing.model in MODEL_CATALOG and MODEL_CATALOG[routing.model].provider in self._clients
             result[task_type] = {
-                "model": model_key,
-                "tier": config["tier"],
-                "reason": config["reason"],
+                "model": routing.model,
+                "tier": routing.tier,
+                "reason": routing.reason,
+                "capabilities": routing.capabilities,
                 "available": available,
             }
         return result

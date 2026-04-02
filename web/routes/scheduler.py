@@ -41,12 +41,11 @@ def scheduler_overview():
 @scheduler_bp.route("/jobs")
 def list_jobs():
     """List all scheduler jobs."""
-    empire_id = current_app.config.get("EMPIRE_ID", "")
-    from core.scheduler.jobs import get_all_jobs
-    jobs = get_all_jobs(empire_id)
+    daemon = _get_daemon()
+    jobs = daemon.get_next_runs()
     return jsonify([
-        {"name": j.name, "description": j.description, "interval": j.interval_seconds,
-         "priority": j.priority, "enabled": j.enabled}
+        {"name": j.job_name, "interval": j.interval_seconds,
+         "next_run": j.next_run, "last_run": j.last_run, "status": j.status}
         for j in jobs
     ])
 

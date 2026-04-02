@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 class JobConfig:
     """Configuration for a scheduled job."""
     name: str
-    job_type: str
     interval_seconds: int
     handler: Callable[[], dict]
     enabled: bool = True
@@ -30,6 +29,10 @@ class JobConfig:
     last_error: str = ""
     avg_duration_ms: float = 0.0
     metadata_json: dict = field(default_factory=dict)
+
+    @property
+    def job_type(self) -> str:
+        return self.name
 
 
 @dataclass
@@ -85,7 +88,6 @@ class SchedulerDaemon:
             from config.settings import get_settings
             s = get_settings().scheduler
         except Exception:
-            # Use defaults
             class DefaultScheduler:
                 health_check_interval_minutes = 5
                 learning_cycle_hours = 6
@@ -93,195 +95,41 @@ class SchedulerDaemon:
                 knowledge_maintenance_hours = 4
             s = DefaultScheduler()
 
-        self.register_job(JobConfig(
-            name="health_check",
-            job_type="health_check",
-            interval_seconds=s.health_check_interval_minutes * 60,
-            handler=self._run_health_check,
-            priority=1,
-            description="System health checks",
-        ))
+        # (name, interval_seconds, priority, description)
+        jobs = [
+            # ── Core system jobs ─────────────────────────────────────
+            ("health_check",         s.health_check_interval_minutes * 60, 1, "System health checks"),
+            ("budget_check",         900,                                  2, "Budget limit checking"),
+            ("directive_check",      300,                                  3, "Check for pending directives"),
+            ("memory_decay",         3600,                                 3, "Apply memory decay"),
+            # ── Knowledge & research ─────────────────────────────────
+            ("knowledge_maintenance", s.knowledge_maintenance_hours * 3600, 4, "Knowledge graph maintenance"),
+            ("intelligence_sweep",   43200,                                4, "Proactive discovery across AI sources"),
+            ("autonomous_research",  21600,                                4, "Gap-driven autonomous research"),
+            ("learning_cycle",       s.learning_cycle_hours * 3600,        5, "Lieutenant learning cycles"),
+            ("quality_scoring",      21600,                                5, "8-dimension entity quality scoring"),
+            ("duplicate_resolution", 14400,                                5, "3-stage fuzzy entity deduplication"),
+            ("cross_synthesis",      28800,                                5, "Synthesize overlapping knowledge across domains"),
+            ("autonomous_warroom",   21600,                                5, "Auto-detect cross-domain topics and run debates"),
+            # ── Evolution & maintenance ──────────────────────────────
+            ("evolution_cycle",      s.evolution_cycle_hours * 3600,        6, "Self-improvement evolution cycle"),
+            ("memory_compression",   43200,                                6, "LLM-powered memory compression"),
+            ("llm_audit",            43200,                                6, "Deep LLM audit for contaminated entities"),
+            ("iterative_deepening",  28800,                                6, "Deepen high-signal shallow research"),
+            ("content_generation",   86400,                                7, "Auto-generate research digest"),
+            ("auto_spawn",           86400,                                7, "Auto-spawn lieutenants for uncovered clusters"),
+            ("shallow_enrichment",   21600,                                7, "Enrich low-detail knowledge graph entities"),
+            ("cleanup",              86400,                                8, "Archive and cleanup old data"),
+            ("embedding_backfill",   3600,                                 8, "Backfill embeddings for memories and entities"),
+        ]
 
-        self.register_job(JobConfig(
-            name="memory_decay",
-            job_type="memory_decay",
-            interval_seconds=3600,  # 1 hour
-            handler=self._run_memory_decay,
-            priority=3,
-            description="Apply memory decay",
-        ))
-
-        self.register_job(JobConfig(
-            name="knowledge_maintenance",
-            job_type="knowledge_maintenance",
-            interval_seconds=s.knowledge_maintenance_hours * 3600,
-            handler=self._run_knowledge_maintenance,
-            priority=4,
-            description="Knowledge graph maintenance",
-        ))
-
-        self.register_job(JobConfig(
-            name="learning_cycle",
-            job_type="learning_cycle",
-            interval_seconds=s.learning_cycle_hours * 3600,
-            handler=self._run_learning_cycle,
-            priority=5,
-            description="Lieutenant learning cycles",
-        ))
-
-        self.register_job(JobConfig(
-            name="evolution_cycle",
-            job_type="evolution_cycle",
-            interval_seconds=s.evolution_cycle_hours * 3600,
-            handler=self._run_evolution_cycle,
-            priority=6,
-            description="Self-improvement evolution cycle",
-        ))
-
-        self.register_job(JobConfig(
-            name="budget_check",
-            job_type="budget_check",
-            interval_seconds=900,  # 15 minutes
-            handler=self._run_budget_check,
-            priority=2,
-            description="Budget limit checking",
-        ))
-
-        self.register_job(JobConfig(
-            name="directive_check",
-            job_type="directive_check",
-            interval_seconds=300,  # 5 minutes
-            handler=self._run_directive_check,
-            priority=3,
-            description="Check for pending directives",
-        ))
-
-        self.register_job(JobConfig(
-            name="cleanup",
-            job_type="cleanup",
-            interval_seconds=86400,  # 24 hours
-            handler=self._run_cleanup,
-            priority=8,
-            description="Archive and cleanup old data",
-        ))
-
-        # ── Additional autonomous jobs ─────────────────────────────────
-        self.register_job(JobConfig(
-            name="intelligence_sweep",
-            job_type="intelligence_sweep",
-            interval_seconds=43200,  # 12 hours
-            handler=self._run_intelligence_sweep,
-            priority=4,
-            description="Proactive discovery across AI sources",
-        ))
-
-        self.register_job(JobConfig(
-            name="quality_scoring",
-            job_type="quality_scoring",
-            interval_seconds=21600,  # 6 hours
-            handler=self._run_quality_scoring,
-            priority=5,
-            description="8-dimension entity quality scoring",
-        ))
-
-        self.register_job(JobConfig(
-            name="duplicate_resolution",
-            job_type="duplicate_resolution",
-            interval_seconds=14400,  # 4 hours
-            handler=self._run_duplicate_resolution,
-            priority=5,
-            description="3-stage fuzzy entity deduplication",
-        ))
-
-        self.register_job(JobConfig(
-            name="memory_compression",
-            job_type="memory_compression",
-            interval_seconds=43200,  # 12 hours
-            handler=self._run_memory_compression,
-            priority=6,
-            description="LLM-powered memory compression",
-        ))
-
-        self.register_job(JobConfig(
-            name="autonomous_research",
-            job_type="autonomous_research",
-            interval_seconds=21600,  # 6 hours
-            handler=self._run_autonomous_research,
-            priority=4,
-            description="Gap-driven autonomous research",
-        ))
-
-        self.register_job(JobConfig(
-            name="content_generation",
-            job_type="content_generation",
-            interval_seconds=86400,  # 24 hours
-            handler=self._run_content_generation,
-            priority=7,
-            description="Auto-generate research digest",
-        ))
-
-        self.register_job(JobConfig(
-            name="llm_audit",
-            job_type="llm_audit",
-            interval_seconds=43200,  # 12 hours
-            handler=self._run_llm_audit,
-            priority=6,
-            description="Deep LLM audit for contaminated entities",
-        ))
-
-        self.register_job(JobConfig(
-            name="auto_spawn",
-            job_type="auto_spawn",
-            interval_seconds=86400,  # 24 hours
-            handler=self._run_auto_spawn,
-            priority=7,
-            description="Auto-spawn lieutenants for uncovered topic clusters",
-        ))
-
-        self.register_job(JobConfig(
-            name="iterative_deepening",
-            job_type="iterative_deepening",
-            interval_seconds=28800,  # 8 hours
-            handler=self._run_iterative_deepening,
-            priority=6,
-            description="Deepen high-signal shallow research",
-        ))
-
-        self.register_job(JobConfig(
-            name="shallow_enrichment",
-            job_type="shallow_enrichment",
-            interval_seconds=21600,  # 6 hours
-            handler=self._run_shallow_enrichment,
-            priority=7,
-            description="Enrich low-detail knowledge graph entities",
-        ))
-
-        self.register_job(JobConfig(
-            name="cross_synthesis",
-            job_type="cross_synthesis",
-            interval_seconds=28800,  # 8 hours
-            handler=self._run_cross_synthesis,
-            priority=5,
-            description="Synthesize overlapping knowledge across lieutenant domains",
-        ))
-
-        self.register_job(JobConfig(
-            name="autonomous_warroom",
-            job_type="autonomous_warroom",
-            interval_seconds=21600,  # 6 hours
-            handler=self._run_autonomous_warroom,
-            priority=5,
-            description="Auto-detect cross-domain topics and run lieutenant debates",
-        ))
-
-        self.register_job(JobConfig(
-            name="embedding_backfill",
-            job_type="embedding_backfill",
-            interval_seconds=3600,  # 1 hour
-            handler=self._run_embedding_backfill,
-            priority=8,
-            description="Generate embeddings for memories and KG entities that lack them",
-        ))
+        for name, interval, priority, description in jobs:
+            handler = getattr(self, f"_run_{name}", None)
+            if handler:
+                self.register_job(JobConfig(
+                    name=name, interval_seconds=interval, handler=handler,
+                    priority=priority, description=description,
+                ))
 
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
@@ -780,35 +628,6 @@ class SchedulerDaemon:
             logger.warning("Autonomous research failed: %s", e)
             return {"error": str(e)}
 
-    def _generate_research_topic(self, domain: str, domain_desc: str, current_count: int) -> str:
-        """Use LLM to generate a specific research topic for a weak domain."""
-        try:
-            from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
-
-            router = ModelRouter(self.empire_id)
-            prompt = (
-                f"You are an AI research director. The '{domain}' domain currently has {current_count} "
-                f"knowledge entries, which is low.\n\n"
-                f"Domain focus: {domain_desc}\n\n"
-                f"Generate ONE specific, timely research topic that would fill the biggest gap "
-                f"in this domain. Focus on developments from the last 3 months (early 2025).\n\n"
-                f"Respond with ONLY the topic — one sentence, no explanation."
-            )
-
-            response = router.execute(
-                LLMRequest(
-                    messages=[LLMMessage.user(prompt)],
-                    max_tokens=100,
-                    temperature=0.7,
-                ),
-                TaskMetadata(task_type="planning", complexity="simple"),
-            )
-            return response.content.strip().strip('"')
-        except Exception as e:
-            logger.debug("Topic generation failed for %s: %s", domain, e)
-            return ""
-
     def _run_content_generation(self) -> dict:
         """Auto-generate a research digest from recent findings."""
         try:
@@ -890,289 +709,15 @@ class SchedulerDaemon:
             return {"error": str(e)}
 
     def _run_autonomous_warroom(self) -> dict:
-        """Auto-detect cross-domain topics and run lieutenant debates.
-
-        Flow:
-        1. Find recent high-importance research across domains
-        2. Use LLM to identify a debate-worthy topic where lieutenants would disagree
-        3. Spin up a war room with relevant lieutenants
-        4. Store the synthesis as experiential + design memories
-        """
+        """Auto-detect cross-domain topics and run lieutenant debates."""
         try:
-            import json
-            from core.memory.manager import MemoryManager
-            from core.memory.bitemporal import BiTemporalMemory
-            from db.engine import get_session
-            from db.repositories.lieutenant import LieutenantRepository
-
-            mm = MemoryManager(self.empire_id)
-
-            # 1. Gather recent high-importance memories across all domains
-            recent = mm.recall(memory_types=["semantic"], limit=30)
-            if len(recent) < 5:
-                return {"skipped": True, "reason": "Not enough semantic memories for debate"}
-
-            recent_titles = [m.get("title", m.get("content", "")[:80]) for m in recent[:20]]
-            recent_block = "\n".join(f"- {t}" for t in recent_titles)
-
-            # 2. Ask LLM to pick a debate-worthy topic
-            from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
-
-            router = ModelRouter(self.empire_id)
-
-            topic_prompt = (
-                "You are the War Room Director for an autonomous AI research system.\n"
-                "Below are recent research findings stored in Empire's memory:\n\n"
-                f"{recent_block}\n\n"
-                "Identify ONE topic where multiple AI research domains would have "
-                "genuinely different perspectives worth debating. The topic should be:\n"
-                "- Timely and based on the recent findings above\n"
-                "- Controversial or multi-faceted (not a settled fact)\n"
-                "- Relevant to at least 3 of these domains: models, research, agents, tooling, industry, open_source\n\n"
-                "Respond with EXACTLY this JSON:\n"
-                '{"topic": "the debate topic as a question", '
-                '"context": "1-2 sentences of context from the findings", '
-                '"domains": ["domain1", "domain2", "domain3"]}'
-            )
-
-            resp = router.execute(
-                LLMRequest(messages=[LLMMessage.user(topic_prompt)], max_tokens=300, temperature=0.7),
-                TaskMetadata(task_type="planning", complexity="simple"),
-            )
-
-            # Parse topic
-            text = resp.content
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start < 0 or end <= start:
-                return {"error": "Failed to parse debate topic"}
-
-            try:
-                plan = json.loads(text[start:end])
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning("Autonomous warroom: failed to parse LLM JSON: %s", e)
-                return {"error": f"Failed to parse debate topic JSON: {e}"}
-            debate_topic = plan.get("topic", "")
-            debate_context = plan.get("context", "")
-            debate_domains = plan.get("domains", [])
-
-            if not debate_topic or len(debate_domains) < 2:
-                return {"skipped": True, "reason": "No suitable debate topic found"}
-
-            # 3. Create war room session with relevant lieutenants
-            from core.warroom.session import WarRoomSession
-            from db.models import _generate_id
-
-            session_db = None
-            try:
-                session_db = get_session()
-                lt_repo = LieutenantRepository(session_db)
-                all_lts = lt_repo.get_by_empire(self.empire_id, status="active")
-
-                war_room = WarRoomSession(
-                    session_id=_generate_id(),
-                    empire_id=self.empire_id,
-                    session_type="autonomous_debate",
-                )
-
-                added = 0
-                for lt in all_lts:
-                    if lt.domain in debate_domains:
-                        war_room.add_participant(lt.id, lt.name, lt.domain)
-                        added += 1
-
-                if added < 2:
-                    return {"skipped": True, "reason": f"Only {added} lieutenant(s) matched domains"}
-
-                # 4. Run the debate
-                logger.info("Autonomous war room: '%s' with %d lieutenants", debate_topic[:60], added)
-                result = war_room.start_debate(debate_topic, context=debate_context)
-
-                # 5. Store synthesis as experiential memory + design memory
-                synthesis = result.get("synthesis", {})
-                synthesis_text = ""
-                if isinstance(synthesis, dict):
-                    synthesis_text = synthesis.get("synthesis", "") or synthesis.get("summary", "") or str(synthesis)
-                elif isinstance(synthesis, str):
-                    synthesis_text = synthesis
-
-                if synthesis_text:
-                    bt = BiTemporalMemory(self.empire_id)
-                    bt.store_smart(
-                        content=f"War Room Debate: {debate_topic}\n\n{synthesis_text[:2000]}",
-                        title=f"Debate: {debate_topic[:60]}",
-                        category="warroom_synthesis",
-                        importance=0.8,
-                        tags=["warroom", "debate", "autonomous"] + debate_domains,
-                    )
-
-                    # Also store as experiential — what did we learn from the debate?
-                    decisions = result.get("synthesis", {}).get("decisions", []) if isinstance(result.get("synthesis"), dict) else []
-                    if decisions:
-                        mm.store(
-                            content=f"Debate decisions on '{debate_topic}':\n" + "\n".join(f"- {d}" for d in decisions[:5]),
-                            memory_type="experiential",
-                            title=f"Debate lesson: {debate_topic[:50]}",
-                            category="warroom_decision",
-                            importance=0.75,
-                            tags=["warroom", "decision", "autonomous"],
-                        )
-
-                return {
-                    "topic": debate_topic,
-                    "participants": added,
-                    "contributions": result.get("participant_count", 0),
-                    "decisions": len(result.get("synthesis", {}).get("decisions", [])) if isinstance(result.get("synthesis"), dict) else 0,
-                    "domains": debate_domains,
-                }
-
-            finally:
-                if session_db is not None:
-                    session_db.close()
-
+            from core.warroom.session import run_autonomous_debate
+            return run_autonomous_debate(self.empire_id)
         except Exception as e:
             logger.warning("Autonomous war room failed: %s", e)
             return {"error": str(e)}
 
     def _run_embedding_backfill(self) -> dict:
-        """Backfill embeddings for memories and KG entities that don't have them.
-
-        Processes a batch per tick to avoid hammering the embedding API.
-        """
-        from db.engine import get_session
-        from db.models import MemoryEntry, KnowledgeEntity
-        from sqlalchemy import select, and_, or_, cast, String
-        from core.memory.embeddings import generate_embeddings_batch
-
-        batch_size = 50
-        total_filled = 0
-
-        # 1. Backfill memory entries (semantic/experiential/design only)
-        # Match both SQL NULL and JSON null (stored as 'null' text in JSON columns)
-        session = None
-        try:
-            session = get_session()
-            stmt = (
-                select(MemoryEntry)
-                .where(and_(
-                    MemoryEntry.empire_id == self.empire_id,
-                    or_(
-                        MemoryEntry.embedding_json.is_(None),
-                        cast(MemoryEntry.embedding_json, String) == "null",
-                        cast(MemoryEntry.embedding_json, String) == "",
-                    ),
-                    MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]),
-                ))
-                .order_by(MemoryEntry.effective_importance.desc())
-                .limit(batch_size)
-            )
-            entries = list(session.execute(stmt).scalars().all())
-
-            if entries:
-                texts = [
-                    f"{e.title}\n{e.content}" if e.title else e.content
-                    for e in entries
-                ]
-                embeddings = generate_embeddings_batch(texts)
-
-                qdrant_batch = []
-                for entry, emb in zip(entries, embeddings):
-                    if emb:
-                        entry.embedding_json = emb
-                        total_filled += 1
-                        qdrant_batch.append({
-                            "memory_id": entry.id,
-                            "embedding": emb,
-                            "empire_id": entry.empire_id,
-                            "lieutenant_id": entry.lieutenant_id or "",
-                            "memory_type": entry.memory_type,
-                            "importance": entry.importance_score or 0.5,
-                            "decay_factor": entry.decay_factor or 1.0,
-                        })
-
-                session.commit()
-
-                # Sync to Qdrant
-                if qdrant_batch:
-                    try:
-                        from core.vector.store import VectorStore
-                        vs = VectorStore.get_instance(self.empire_id)
-                        vs.upsert_memories_batch(qdrant_batch)
-                    except Exception:
-                        pass
-
-                logger.info("Backfilled %d/%d memory embeddings", total_filled, len(entries))
-        except Exception as e:
-            if session is not None:
-                session.rollback()
-            logger.warning("Memory embedding backfill failed: %s", e)
-        finally:
-            if session is not None:
-                session.close()
-
-        # 2. Backfill KG entities
-        kg_filled = 0
-        session2 = None
-        try:
-            session2 = get_session()
-            stmt = (
-                select(KnowledgeEntity)
-                .where(and_(
-                    KnowledgeEntity.empire_id == self.empire_id,
-                    or_(
-                        KnowledgeEntity.embedding_json.is_(None),
-                        cast(KnowledgeEntity.embedding_json, String) == "null",
-                        cast(KnowledgeEntity.embedding_json, String) == "",
-                    ),
-                ))
-                .order_by(KnowledgeEntity.importance_score.desc())
-                .limit(batch_size)
-            )
-            entities = list(session2.execute(stmt).scalars().all())
-
-            if entities:
-                texts = [
-                    f"{e.name}: {e.description}" if e.description else e.name
-                    for e in entities
-                ]
-                embeddings = generate_embeddings_batch(texts)
-
-                qdrant_batch = []
-                for entity, emb in zip(entities, embeddings):
-                    if emb:
-                        entity.embedding_json = emb
-                        kg_filled += 1
-                        qdrant_batch.append({
-                            "entity_id": entity.id,
-                            "embedding": emb,
-                            "empire_id": entity.empire_id,
-                            "entity_type": entity.entity_type or "",
-                            "name": entity.name or "",
-                            "importance": entity.importance_score or 0.5,
-                        })
-
-                session2.commit()
-
-                # Sync to Qdrant
-                if qdrant_batch:
-                    try:
-                        from core.vector.store import VectorStore
-                        vs = VectorStore.get_instance(self.empire_id)
-                        vs.upsert_entities_batch(qdrant_batch)
-                    except Exception:
-                        pass
-
-                logger.info("Backfilled %d/%d KG entity embeddings", kg_filled, len(entities))
-        except Exception as e:
-            if session2 is not None:
-                session2.rollback()
-            logger.warning("KG embedding backfill failed: %s", e)
-        finally:
-            if session2 is not None:
-                session2.close()
-
-        return {
-            "memories_backfilled": total_filled,
-            "kg_entities_backfilled": kg_filled,
-        }
+        """Backfill embeddings for memories and KG entities that lack them."""
+        from core.memory.embeddings import backfill_embeddings
+        return backfill_embeddings(self.empire_id)

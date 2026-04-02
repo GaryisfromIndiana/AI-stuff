@@ -302,6 +302,21 @@ def read_session(engine: Engine | None = None) -> Generator[Session, None, None]
         session.close()
 
 
+@contextmanager
+def repo_scope(repo_class):
+    """Context manager that creates a repository with its own session and auto-closes.
+
+    Usage:
+        with repo_scope(DirectiveRepository) as repo:
+            repo.get_active(empire_id)
+    """
+    session = get_session()
+    try:
+        yield repo_class(session)
+    finally:
+        session.close()
+
+
 def init_db(engine: Engine | None = None) -> None:
     """Initialize the database by creating all tables and seed the default empire.
 
@@ -463,6 +478,8 @@ def get_db_stats(engine: Engine | None = None) -> dict:
     try:
         with engine.connect() as conn:
             for table in stats["tables"]:
+                if not table.isidentifier():
+                    continue
                 result = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"'))
                 stats[f"rows_{table}"] = result.scalar()
     except Exception as e:

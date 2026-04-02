@@ -59,20 +59,6 @@ class KnowledgeSearchEngine:
 
     def __init__(self, empire_id: str = ""):
         self.empire_id = empire_id
-        self._repo = None
-
-    def _get_repo(self):
-        """Get a fresh repository with its own session."""
-        from db.engine import get_session
-        from db.repositories.knowledge import KnowledgeRepository
-        return KnowledgeRepository(get_session())
-
-    def _close_repo(self, repo) -> None:
-        """Close the session owned by a repository."""
-        try:
-            repo.session.close()
-        except Exception:
-            pass
 
     def text_search(
         self,
@@ -95,8 +81,9 @@ class KnowledgeSearchEngine:
         import time
         start = time.time()
 
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             entities = repo.search_entities(query, self.empire_id, entity_type or None, limit)
 
             results = []
@@ -128,8 +115,6 @@ class KnowledgeSearchEngine:
                 search_time_ms=(time.time() - start) * 1000,
                 search_type="text",
             )
-        finally:
-            self._close_repo(repo)
 
     def semantic_search(
         self,
@@ -155,8 +140,9 @@ class KnowledgeSearchEngine:
         if not embedding:
             return self.text_search(query, limit=limit)  # Fallback to text search
 
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             similar = repo.similarity_search(
                 embedding=embedding,
                 empire_id=self.empire_id,
@@ -185,8 +171,6 @@ class KnowledgeSearchEngine:
                 search_time_ms=(time.time() - start) * 1000,
                 search_type="semantic",
             )
-        finally:
-            self._close_repo(repo)
 
     def hybrid_search(
         self,
@@ -303,12 +287,11 @@ class KnowledgeSearchEngine:
         Returns:
             List of suggestion strings.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             entities = repo.search_entities(query, self.empire_id, limit=limit)
             return [e.name for e in entities]
-        finally:
-            self._close_repo(repo)
 
     def find_related(self, entity_name: str, limit: int = 10) -> list[SearchResult]:
         """Find entities related to a given entity.
@@ -320,8 +303,9 @@ class KnowledgeSearchEngine:
         Returns:
             List of related entity results.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        with repo_scope(KnowledgeRepository) as repo:
             entity = repo.get_by_name(entity_name, self.empire_id)
 
             if not entity:
@@ -341,8 +325,6 @@ class KnowledgeSearchEngine:
                 )
                 for n in neighbors[:limit]
             ]
-        finally:
-            self._close_repo(repo)
 
     def _text_relevance(self, query: str, name: str, description: str) -> float:
         """Calculate text relevance score."""

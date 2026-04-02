@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-import time
-from typing import Any, Generator
+from typing import Any, Generator, Optional
 
 import openai
 
@@ -18,13 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAIClient(LLMClient):
-    """Client for the OpenAI API.
-
-    Supports completions, streaming, function/tool calling, JSON mode,
-    and automatic retries with exponential backoff.
-    """
+    """Client for the OpenAI API."""
 
     provider_name = "openai"
+    _max_retries = 3
 
     def __init__(self, api_key: str | None = None):
         super().__init__()
@@ -34,16 +30,8 @@ class OpenAIClient(LLMClient):
         self.client = openai.OpenAI(api_key=api_key)
         self._default_model = "gpt-4o"
 
-    def complete(self, request: LLMRequest) -> LLMResponse:
-        """Send a completion request to OpenAI.
-
-        Args:
-            request: The LLM request.
-
-        Returns:
-            LLM response with content, cost, and usage stats.
-        """
-        model = request.model or self._default_model
+    def _call_provider(self, request: LLMRequest, model: str) -> Any:
+        """Build kwargs and call the OpenAI chat completions API."""
         messages = self._format_messages(request.messages, request.system_prompt)
 
         kwargs: dict[str, Any] = {
@@ -71,97 +59,62 @@ class OpenAIClient(LLMClient):
         if request.stop_sequences:
             kwargs["stop"] = request.stop_sequences
 
-        start_time = time.time()
-        last_error = None
+        return self.client.chat.completions.create(**kwargs)
 
-        # Rate limiter enforcement — wait if needed before making request
-        estimated_tokens = sum(len(m.get("content", "")) // 4 for m in messages) + request.max_tokens
-        while not self._rate_limiter.can_proceed(estimated_tokens):
-            wait = self._rate_limiter.wait_time()
-            if wait > 0:
-                logger.debug("Rate limit backpressure: waiting %.1fs", wait)
-                time.sleep(min(wait, 5.0))
-            else:
-                break
+    def _parse_response(self, raw: Any, model: str, latency_ms: float) -> LLMResponse:
+        """Parse an OpenAI response into LLMResponse."""
+        choice = raw.choices[0]
+        content = choice.message.content or ""
+        tool_calls = []
 
-        for attempt in range(3):
-            try:
-                response = self.client.chat.completions.create(**kwargs)
-                latency_ms = (time.time() - start_time) * 1000
+        if choice.message.tool_calls:
+            for tc in choice.message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {"raw": tc.function.arguments}
+                tool_calls.append(ToolCall(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=args,
+                ))
 
-                choice = response.choices[0]
-                content = choice.message.content or ""
-                tool_calls = []
+        finish_reason = choice.finish_reason or "stop"
 
-                if choice.message.tool_calls:
-                    for tc in choice.message.tool_calls:
-                        try:
-                            args = json.loads(tc.function.arguments)
-                        except json.JSONDecodeError:
-                            args = {"raw": tc.function.arguments}
-                        tool_calls.append(ToolCall(
-                            id=tc.id,
-                            name=tc.function.name,
-                            arguments=args,
-                        ))
+        tokens_in = raw.usage.prompt_tokens if raw.usage else 0
+        tokens_out = raw.usage.completion_tokens if raw.usage else 0
 
-                finish_reason = choice.finish_reason or "stop"
-                if finish_reason == "tool_calls":
-                    finish_reason = "tool_calls"
+        return LLMResponse(
+            content=content,
+            model=model,
+            provider="openai",
+            tokens_input=tokens_in,
+            tokens_output=tokens_out,
+            cost_usd=self._calculate_cost(model, tokens_in, tokens_out),
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            latency_ms=latency_ms,
+            raw_response=raw,
+        )
 
-                tokens_in = response.usage.prompt_tokens if response.usage else 0
-                tokens_out = response.usage.completion_tokens if response.usage else 0
-                cost = self._calculate_cost(model, tokens_in, tokens_out)
-
-                llm_response = LLMResponse(
-                    content=content,
-                    model=model,
-                    provider="openai",
-                    tokens_input=tokens_in,
-                    tokens_output=tokens_out,
-                    cost_usd=cost,
-                    tool_calls=tool_calls,
-                    finish_reason=finish_reason,
-                    latency_ms=latency_ms,
-                    raw_response=response,
-                )
-                self._record_usage(llm_response)
-                return llm_response
-
-            except openai.RateLimitError as e:
-                last_error = e
-                wait = min(2 ** attempt * 2, 30)
-                logger.warning("Rate limited by OpenAI, waiting %ds (attempt %d)", wait, attempt + 1)
-                time.sleep(wait)
-
-            except openai.InternalServerError as e:
-                last_error = e
-                wait = min(2 ** attempt * 3, 60)
-                logger.warning("OpenAI server error, waiting %ds (attempt %d)", wait, attempt + 1)
-                time.sleep(wait)
-
-            except openai.APIStatusError as e:
-                self._errors += 1
-                logger.error("OpenAI API error: %s", e)
-                raise
-
-            except Exception as e:
-                self._errors += 1
-                logger.error("Unexpected error calling OpenAI: %s", e)
-                raise
-
-        self._errors += 1
-        raise last_error or RuntimeError("Failed after retries")
+    def _classify_error(self, error: Exception, attempt: int) -> Optional[float]:
+        """Classify OpenAI errors for retry decisions."""
+        if isinstance(error, openai.RateLimitError):
+            wait = min(2 ** attempt * 2, 30)
+            logger.warning("Rate limited by OpenAI, waiting %ds (attempt %d)", wait, attempt + 1)
+            return float(wait)
+        if isinstance(error, openai.InternalServerError):
+            wait = min(2 ** attempt * 3, 60)
+            logger.warning("OpenAI server error, waiting %ds (attempt %d)", wait, attempt + 1)
+            return float(wait)
+        if isinstance(error, openai.APIStatusError):
+            logger.error("OpenAI API error: %s", error)
+            return None
+        logger.error("Unexpected error calling OpenAI: %s", error)
+        return None
 
     def stream(self, request: LLMRequest) -> Generator[StreamChunk, None, None]:
-        """Stream a completion response from OpenAI.
-
-        Args:
-            request: The LLM request.
-
-        Yields:
-            StreamChunk instances with content deltas.
-        """
+        """Stream a completion response from OpenAI."""
         model = request.model or self._default_model
         messages = self._format_messages(request.messages, request.system_prompt)
 
@@ -183,18 +136,16 @@ class OpenAIClient(LLMClient):
 
             for chunk in stream:
                 if not chunk.choices:
-                    # Usage chunk at the end
                     if chunk.usage:
                         tokens_in = chunk.usage.prompt_tokens
                         tokens_out = chunk.usage.completion_tokens
-                        cost = self._calculate_cost(model, tokens_in, tokens_out)
                         self._record_usage(LLMResponse(
                             content=total_content,
                             model=model,
                             provider="openai",
                             tokens_input=tokens_in,
                             tokens_output=tokens_out,
-                            cost_usd=cost,
+                            cost_usd=self._calculate_cost(model, tokens_in, tokens_out),
                         ))
                     continue
 
@@ -278,20 +229,9 @@ class OpenAIClient(LLMClient):
         text: str,
         model: str = "text-embedding-3-small",
     ) -> list[float]:
-        """Create an embedding vector for text.
-
-        Args:
-            text: Text to embed.
-            model: Embedding model.
-
-        Returns:
-            Embedding vector.
-        """
+        """Create an embedding vector for text."""
         try:
-            response = self.client.embeddings.create(
-                input=text,
-                model=model,
-            )
+            response = self.client.embeddings.create(input=text, model=model)
             return response.data[0].embedding
         except Exception as e:
             logger.error("Embedding error: %s", e)
@@ -302,20 +242,9 @@ class OpenAIClient(LLMClient):
         texts: list[str],
         model: str = "text-embedding-3-small",
     ) -> list[list[float]]:
-        """Create embeddings for multiple texts.
-
-        Args:
-            texts: List of texts to embed.
-            model: Embedding model.
-
-        Returns:
-            List of embedding vectors.
-        """
+        """Create embeddings for multiple texts."""
         try:
-            response = self.client.embeddings.create(
-                input=texts,
-                model=model,
-            )
+            response = self.client.embeddings.create(input=texts, model=model)
             return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
         except Exception as e:
             logger.error("Batch embedding error: %s", e)

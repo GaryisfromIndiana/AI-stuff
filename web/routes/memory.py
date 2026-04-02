@@ -48,7 +48,8 @@ def memories_by_type(memory_type: str):
         memories = mm.recall(memory_types=[memory_type], limit=50)
         return jsonify(memories)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @memory_bp.route("/by-lieutenant/<lieutenant_id>")
@@ -61,7 +62,8 @@ def memories_by_lieutenant(lieutenant_id: str):
         memories = mm.recall(lieutenant_id=lieutenant_id, limit=50)
         return jsonify(memories)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @memory_bp.route("/decay", methods=["POST"])
@@ -75,7 +77,8 @@ def run_decay():
         return jsonify({"decayed": decayed})
     except Exception as e:
         logger.error("Memory decay error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @memory_bp.route("/cleanup", methods=["POST"])
@@ -89,7 +92,8 @@ def run_cleanup():
         return jsonify(result)
     except Exception as e:
         logger.error("Memory cleanup error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @memory_bp.route("/consolidate", methods=["POST"])
@@ -103,7 +107,8 @@ def run_consolidate():
         return jsonify({"promoted": promoted})
     except Exception as e:
         logger.error("Memory consolidation error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @memory_bp.route("/repair", methods=["POST"])
@@ -222,7 +227,8 @@ def qdrant_migrate():
         })
     except Exception as e:
         logger.error("Qdrant migration error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @memory_bp.route("/qdrant/debug")

@@ -14,11 +14,11 @@ def list_warrooms():
     """List war room sessions."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
     try:
-        from db.engine import get_session
+        from db.engine import read_session
         from db.models import WarRoom
         from sqlalchemy import select, desc
-        session = get_session()
-        try:
+
+        with read_session() as session:
             stmt = select(WarRoom).where(WarRoom.empire_id == empire_id).order_by(desc(WarRoom.created_at)).limit(20)
             warrooms = list(session.execute(stmt).scalars().all())
             return render_template("warrooms/list.html", warrooms=[
@@ -26,8 +26,6 @@ def list_warrooms():
                  "cost": w.total_cost_usd, "created_at": w.created_at.isoformat() if w.created_at else None}
                 for w in warrooms
             ])
-        finally:
-            session.close()
     except Exception as e:
         return render_template("warrooms/list.html", warrooms=[], error=str(e))
 
@@ -36,10 +34,10 @@ def list_warrooms():
 def warroom_detail(session_id: str):
     """War room session detail."""
     try:
-        from db.engine import get_session
+        from db.engine import read_session
         from db.models import WarRoom
-        session = get_session()
-        try:
+
+        with read_session() as session:
             warroom = session.get(WarRoom, session_id)
             if not warroom:
                 return "War room not found", 404
@@ -49,8 +47,6 @@ def warroom_detail(session_id: str):
                 "action_items": warroom.action_items_json, "transcript": warroom.transcript_json,
                 "cost": warroom.total_cost_usd,
             })
-        finally:
-            session.close()
     except Exception as e:
         return str(e), 500
 

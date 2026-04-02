@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -12,6 +13,9 @@ from typing import Callable, Optional
 from flask import request, jsonify
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of tracked clients before evicting stale entries
+_MAX_TRACKED_CLIENTS = 10_000
 
 
 @dataclass
@@ -28,8 +32,10 @@ class RateLimiter:
 
     def __init__(self, config: RateLimitConfig | None = None):
         self.config = config or RateLimitConfig()
+        self._lock = threading.Lock()
         self._minute_log: dict[str, list[float]] = defaultdict(list)
         self._hour_log: dict[str, list[float]] = defaultdict(list)
+        self._last_eviction = time.time()
 
     def _get_client_id(self) -> str:
         api_key = request.headers.get("X-API-Key", "")
@@ -38,6 +44,7 @@ class RateLimiter:
         return f"ip:{request.remote_addr or 'unknown'}"
 
     def _clean_old_entries(self, client_id: str) -> None:
+        """Remove expired timestamps for a client. Must be called under lock."""
         now = time.time()
         self._minute_log[client_id] = [
             t for t in self._minute_log[client_id] if t > now - 60
@@ -45,6 +52,21 @@ class RateLimiter:
         self._hour_log[client_id] = [
             t for t in self._hour_log[client_id] if t > now - 3600
         ]
+
+    def _evict_stale_clients(self) -> None:
+        """Remove clients with no recent activity. Must be called under lock."""
+        now = time.time()
+        if now - self._last_eviction < 300:  # Evict at most every 5 minutes
+            return
+        self._last_eviction = now
+
+        stale = [
+            cid for cid, timestamps in self._hour_log.items()
+            if not timestamps or timestamps[-1] < now - 3600
+        ]
+        for cid in stale:
+            self._minute_log.pop(cid, None)
+            self._hour_log.pop(cid, None)
 
     def check_rate_limit(
         self,
@@ -58,33 +80,39 @@ class RateLimiter:
         max_rph = rph_override or self.config.requests_per_hour
 
         client_id = self._get_client_id()
-        self._clean_old_entries(client_id)
 
-        rpm = len(self._minute_log[client_id])
-        rph = len(self._hour_log[client_id])
+        with self._lock:
+            self._clean_old_entries(client_id)
 
-        info = {
-            "client_id": client_id[:32],
-            "requests_minute": rpm,
-            "requests_hour": rph,
-            "limit_minute": max_rpm,
-            "limit_hour": max_rph,
-        }
+            # Evict stale clients if we have too many tracked
+            if len(self._hour_log) > _MAX_TRACKED_CLIENTS:
+                self._evict_stale_clients()
 
-        if rpm >= max_rpm:
-            return False, {**info, "blocked": True, "reason": "minute_limit", "retry_after": 60}
+            rpm = len(self._minute_log[client_id])
+            rph = len(self._hour_log[client_id])
 
-        if rph >= max_rph:
-            return False, {**info, "blocked": True, "reason": "hour_limit", "retry_after": 3600}
+            info = {
+                "client_id": client_id[:32],
+                "requests_minute": rpm,
+                "requests_hour": rph,
+                "limit_minute": max_rpm,
+                "limit_hour": max_rph,
+            }
 
-        now = time.time()
-        self._minute_log[client_id].append(now)
-        self._hour_log[client_id].append(now)
+            if rpm >= max_rpm:
+                return False, {**info, "blocked": True, "reason": "minute_limit", "retry_after": 60}
 
-        info["allowed"] = True
-        info["remaining_minute"] = max_rpm - rpm - 1
-        info["remaining_hour"] = max_rph - rph - 1
-        return True, info
+            if rph >= max_rph:
+                return False, {**info, "blocked": True, "reason": "hour_limit", "retry_after": 3600}
+
+            now = time.time()
+            self._minute_log[client_id].append(now)
+            self._hour_log[client_id].append(now)
+
+            info["allowed"] = True
+            info["remaining_minute"] = max_rpm - rpm - 1
+            info["remaining_hour"] = max_rph - rph - 1
+            return True, info
 
 
 _rate_limiter: RateLimiter | None = None

@@ -69,13 +69,6 @@ class EvolutionExecutor:
     def __init__(self, empire_id: str = ""):
         self.empire_id = empire_id
         self._applied: dict[str, dict] = {}  # proposal_id → state before change
-        self._repo = None
-
-    def _get_repo(self):
-        """Get a fresh repository with its own session."""
-        from db.engine import get_session
-        from db.repositories.evolution import EvolutionRepository
-        return EvolutionRepository(get_session())
 
     def execute_proposal(self, proposal: dict) -> ExecutionResult:
         """Apply a single approved proposal.
@@ -273,9 +266,11 @@ class EvolutionExecutor:
 
         try:
             # Mark as rolled back in DB
-            repo = self._get_repo()
-            repo.mark_rolled_back(proposal_id)
-            repo.commit()
+            from db.engine import repo_scope
+            from db.repositories.evolution import EvolutionRepository
+            with repo_scope(EvolutionRepository) as repo:
+                repo.mark_rolled_back(proposal_id)
+                repo.commit()
 
             # Store rollback event in memory
             from core.memory.manager import MemoryManager
@@ -349,9 +344,11 @@ class EvolutionExecutor:
             outcome: Outcome data.
         """
         try:
-            repo = self._get_repo()
-            repo.update(proposal_id, application_result_json=outcome)
-            repo.commit()
+            from db.engine import repo_scope
+            from db.repositories.evolution import EvolutionRepository
+            with repo_scope(EvolutionRepository) as repo:
+                repo.update(proposal_id, application_result_json=outcome)
+                repo.commit()
         except Exception as e:
             logger.warning("Failed to record outcome: %s", e)
 
@@ -419,10 +416,12 @@ class EvolutionExecutor:
     def _record_execution(self, result: ExecutionResult) -> None:
         """Record execution result in DB."""
         try:
-            repo = self._get_repo()
-            if result.proposal_id:
-                if result.status == "applied":
-                    repo.mark_applied(result.proposal_id, {"changes": result.changes_applied})
-                repo.commit()
+            from db.engine import repo_scope
+            from db.repositories.evolution import EvolutionRepository
+            with repo_scope(EvolutionRepository) as repo:
+                if result.proposal_id:
+                    if result.status == "applied":
+                        repo.mark_applied(result.proposal_id, {"changes": result.changes_applied})
+                    repo.commit()
         except Exception as e:
             logger.warning("Failed to record execution: %s", e)

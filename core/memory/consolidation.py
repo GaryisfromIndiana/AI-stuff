@@ -50,21 +50,6 @@ class MemoryConsolidator:
 
     def __init__(self, empire_id: str = ""):
         self.empire_id = empire_id
-        self._repo = None
-
-    def _get_repo(self):
-        """Get a fresh repository with its own session.
-
-        Callers MUST close the session when done, e.g.:
-            repo = self._get_repo()
-            try:
-                ...
-            finally:
-                repo.session.close()
-        """
-        from db.engine import get_session
-        from db.repositories.memory import MemoryRepository
-        return MemoryRepository(get_session())
 
     def run_consolidation(self, lieutenant_id: str = "") -> ConsolidationResult:
         """Run a full consolidation pass.
@@ -107,8 +92,10 @@ class MemoryConsolidator:
 
         Uses title and content similarity to identify duplicates.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             memories = repo.get_most_important(
                 empire_id=self.empire_id,
                 lieutenant_id=lieutenant_id or None,
@@ -139,8 +126,6 @@ class MemoryConsolidator:
                     ))
 
             return duplicates
-        finally:
-            repo.session.close()
 
     def merge_duplicate_group(self, group: DuplicateGroup) -> bool:
         """Merge a group of duplicate memories.
@@ -150,8 +135,10 @@ class MemoryConsolidator:
         if len(group.memory_ids) < 2:
             return False
 
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             memories = repo.get_many(group.memory_ids)
 
             if len(memories) < 2:
@@ -176,13 +163,13 @@ class MemoryConsolidator:
             repo.flush()
             repo.commit()
             return True
-        finally:
-            repo.session.close()
 
     def find_promotion_candidates(self, lieutenant_id: str = "") -> list[PromotionCandidate]:
         """Find memories that should be promoted to a higher tier."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             candidates = repo.get_promotion_candidates(
                 empire_id=self.empire_id,
                 min_importance=0.65,
@@ -203,13 +190,13 @@ class MemoryConsolidator:
                 ))
 
             return promotions
-        finally:
-            repo.session.close()
 
     def promote_memory(self, candidate: PromotionCandidate) -> bool:
         """Promote a memory to a higher tier."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             memory = repo.get(candidate.memory_id)
 
             if not memory:
@@ -236,8 +223,6 @@ class MemoryConsolidator:
             repo.commit()
 
             return True
-        finally:
-            repo.session.close()
 
     def summarize_old_episodes(self, lieutenant_id: str = "", days: int = 14) -> int:
         """Summarize clusters of old episodic memories.
@@ -245,8 +230,10 @@ class MemoryConsolidator:
         Instead of keeping many individual episodes, create a summary
         and archive the originals.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             # Get old episodic memories
             from datetime import datetime, timezone, timedelta
             from sqlalchemy import select, and_
@@ -295,8 +282,6 @@ class MemoryConsolidator:
             repo.commit()
 
             return len(old_episodes)
-        finally:
-            repo.session.close()
 
     def get_consolidation_stats(self, lieutenant_id: str = "") -> dict:
         """Get statistics about consolidation potential."""

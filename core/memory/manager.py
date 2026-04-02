@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional, Generator
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -58,35 +57,6 @@ class MemoryManager:
 
     def __init__(self, empire_id: str = ""):
         self.empire_id = empire_id
-        self._memory_repo = None
-
-    def _get_repo(self):
-        """Get a fresh memory repository with its own session."""
-        from db.engine import get_session
-        from db.repositories.memory import MemoryRepository
-        session = get_session()
-        return MemoryRepository(session)
-
-    @contextmanager
-    def _repo_scope(self, commit: bool = False) -> Generator[Any, None, None]:
-        """Yield a repository with guaranteed session cleanup.
-
-        Args:
-            commit: If True, commit the session on clean exit (for writes like refresh).
-        """
-        from db.engine import get_session
-        from db.repositories.memory import MemoryRepository
-
-        session = get_session()
-        try:
-            yield MemoryRepository(session)
-            if commit:
-                session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
 
     def store(
         self,
@@ -122,9 +92,6 @@ class MemoryManager:
         Returns:
             Created memory entry as dict.
         """
-        importance = max(0.0, min(1.0, importance))
-        confidence = max(0.0, min(1.0, confidence))
-
         expires_at = None
         if expires_hours:
             from datetime import timedelta
@@ -145,13 +112,6 @@ class MemoryManager:
 
         entry_id = _generate_id()
         with session_scope() as session:
-            # Generate embedding for semantic search (non-blocking — None on failure)
-            embedding = None
-            if memory_type in ("semantic", "experiential", "design"):
-                from core.memory.embeddings import generate_embedding
-                embed_text = f"{title}\n{content}" if title else content
-                embedding = generate_embedding(embed_text)
-
             entry = MemoryModel(
                 id=entry_id,
                 empire_id=self.empire_id,
@@ -160,34 +120,17 @@ class MemoryManager:
                 category=category,
                 title=title,
                 content=content,
-                importance_score=importance,
-                confidence_score=confidence,
+                importance_score=max(0.0, min(1.0, importance)),
+                confidence_score=max(0.0, min(1.0, confidence)),
                 effective_importance=importance,
                 decay_factor=1.0,
                 tags_json=tags or [],
                 metadata_json=enriched_metadata,
-                embedding_json=embedding,
                 source_task_id=source_task_id or None,
                 source_type=source_type,
                 expires_at=expires_at,
             )
             session.add(entry)
-
-        # Upsert into Qdrant (non-blocking — skips if not configured)
-        if embedding:
-            try:
-                from core.vector.store import VectorStore
-                vs = VectorStore.get_instance(self.empire_id)
-                vs.upsert_memory(
-                    memory_id=entry_id,
-                    embedding=embedding,
-                    empire_id=self.empire_id,
-                    lieutenant_id=lieutenant_id or "",
-                    memory_type=memory_type,
-                    importance=importance,
-                )
-            except Exception:
-                pass  # Backfill job will catch it
 
         logger.debug("Stored %s memory: %s (importance=%.2f)", memory_type, title or content[:50], importance)
         return {"id": entry_id, "type": memory_type, "title": title}
@@ -211,11 +154,17 @@ class MemoryManager:
         Returns:
             List of memory entries as dicts.
         """
-        with self._repo_scope(commit=refresh_on_access) as repo:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             if query:
-                # Try semantic search first, then merge with ILIKE results
-                entries = self._hybrid_recall(
-                    repo, query, lieutenant_id, memory_types, limit,
+                entries = repo.search(
+                    query=query,
+                    empire_id=self.empire_id,
+                    lieutenant_id=lieutenant_id or None,
+                    memory_types=memory_types,
+                    limit=limit,
                 )
             else:
                 entries = repo.get_most_important(
@@ -230,8 +179,9 @@ class MemoryManager:
                 try:
                     for entry in entries:
                         entry.refresh()
+                    repo.flush()
                 except Exception:
-                    logger.debug("Memory refresh failed, continuing with read-only recall")
+                    repo.rollback()
 
             return [
                 {
@@ -243,61 +193,10 @@ class MemoryManager:
                     "category": e.category,
                     "tags": e.tags_json,
                     "metadata": e.metadata_json,
-                    "confidence": e.confidence_score,
                     "created_at": e.created_at.isoformat() if e.created_at else None,
                 }
                 for e in entries
             ]
-
-    def _hybrid_recall(self, repo, query: str, lieutenant_id: str,
-                       memory_types: list[str] | None, limit: int) -> list:
-        """Combine semantic similarity search with ILIKE text search.
-
-        Semantic results get priority (they find conceptually related memories
-        even without exact word matches), then ILIKE fills remaining slots.
-        """
-        seen_ids: set[str] = set()
-        merged: list = []
-
-        # 1. Semantic search — embed the query and find similar memories
-        try:
-            from core.memory.embeddings import generate_embedding
-            query_embedding = generate_embedding(query)
-            if query_embedding:
-                semantic_results = repo.similarity_search(
-                    embedding=query_embedding,
-                    empire_id=self.empire_id,
-                    lieutenant_id=lieutenant_id or None,
-                    memory_types=memory_types,
-                    limit=limit,
-                    min_similarity=0.35,
-                )
-                for hit in semantic_results:
-                    entry = hit["memory"]
-                    if entry.id not in seen_ids:
-                        seen_ids.add(entry.id)
-                        merged.append(entry)
-        except Exception:
-            logger.debug("Semantic search failed, falling back to text search")
-
-        # 2. ILIKE text search — fills remaining slots
-        remaining = limit - len(merged)
-        if remaining > 0:
-            text_results = repo.search(
-                query=query,
-                empire_id=self.empire_id,
-                lieutenant_id=lieutenant_id or None,
-                memory_types=memory_types,
-                limit=remaining + 5,  # fetch extra to account for dedup
-            )
-            for entry in text_results:
-                if entry.id not in seen_ids:
-                    seen_ids.add(entry.id)
-                    merged.append(entry)
-                    if len(merged) >= limit:
-                        break
-
-        return merged[:limit]
 
     def recall_for_context(
         self,
@@ -313,12 +212,16 @@ class MemoryManager:
         Returns:
             MemoryContext organized by tier.
         """
-        with self._repo_scope(commit=True) as repo:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             memories_by_type = repo.get_for_context(
                 empire_id=self.empire_id,
                 lieutenant_id=lieutenant_id,
                 token_budget=token_budget,
             )
+            repo.commit()
 
             context = MemoryContext()
             for mtype, entries in memories_by_type.items():
@@ -346,11 +249,14 @@ class MemoryManager:
         Returns:
             Number of memories promoted.
         """
-        with self._repo_scope(commit=True) as repo:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             candidates = repo.get_promotion_candidates(
                 empire_id=self.empire_id,
-                min_importance=0.65,
-                min_access_count=1,
+                min_importance=0.7,
+                min_access_count=3,
             )
 
             promoted = 0
@@ -373,6 +279,8 @@ class MemoryManager:
 
                 repo.mark_promoted(entry.id, "experiential")
                 promoted += 1
+
+            repo.commit()
             logger.info("Consolidated %d episodic memories to experiential", promoted)
             return promoted
 
@@ -409,24 +317,28 @@ class MemoryManager:
                 entries = list(session.execute(stmt).scalars().all())
 
                 for entry in entries:
-                    meta = entry.metadata_json or {}
-                    is_superseded = isinstance(meta, dict) and meta.get("superseded_at")
+                    actual_rate = rate
 
-                    # Superseded facts decay — they've been replaced by newer info
-                    if is_superseded:
-                        actual_rate = rate * 5.0
-                    elif entry.memory_type == "episodic":
-                        # Episodic: raw event logs fade over time (the only type that should)
-                        actual_rate = rate * 1.0
-                        if entry.created_at:
-                            age_days = (now - entry.created_at).total_seconds() / 86400
-                            if age_days > 30:
-                                actual_rate *= 1.5
-                    else:
-                        # Semantic, experiential, design: knowledge doesn't expire.
-                        # It gets replaced via supersession, not time decay.
-                        # Skip decay entirely for non-superseded knowledge.
-                        continue
+                    # Type-based decay multiplier
+                    if entry.memory_type == "episodic":
+                        actual_rate *= 2.0
+                    elif entry.memory_type == "semantic":
+                        actual_rate *= 0.5
+                    elif entry.memory_type == "design":
+                        actual_rate *= 0.3  # Design patterns are durable
+
+                    # Age-based decay multiplier
+                    if entry.created_at:
+                        age_days = (now - entry.created_at).total_seconds() / 86400
+                        if age_days > 90:
+                            actual_rate *= 2.0
+                        elif age_days > 30:
+                            actual_rate *= 1.5
+
+                    # Superseded facts decay much faster
+                    meta = entry.metadata_json or {}
+                    if isinstance(meta, dict) and meta.get("superseded_at"):
+                        actual_rate *= 3.0
 
                     # Apply decay
                     entry.decay_factor = max(0.0, entry.decay_factor - actual_rate)
@@ -448,10 +360,15 @@ class MemoryManager:
         Returns:
             Cleanup stats.
         """
-        with self._repo_scope(commit=True) as repo:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             expired = repo.cleanup_expired(self.empire_id)
             low_importance = repo.cleanup_low_importance(self.empire_id, threshold=importance_threshold)
             old_episodic = repo.cleanup_old_episodic(self.empire_id, days=30)
+
+            repo.commit()
 
             stats = {
                 "expired_removed": expired,
@@ -471,7 +388,10 @@ class MemoryManager:
         Returns:
             Memory statistics.
         """
-        with self._repo_scope() as repo:
+        from db.engine import repo_scope
+        from db.repositories.memory import MemoryRepository
+
+        with repo_scope(MemoryRepository) as repo:
             raw_stats = repo.get_stats(self.empire_id, lieutenant_id or None)
 
             return MemoryStats(

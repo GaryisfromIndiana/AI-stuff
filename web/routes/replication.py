@@ -13,11 +13,10 @@ replication_bp = Blueprint("replication", __name__)
 def network_overview():
     """Empire network overview."""
     try:
-        from db.engine import get_session
+        from db.engine import repo_scope
         from db.repositories.empire import EmpireRepository
-        session = get_session()
-        try:
-            repo = EmpireRepository(session)
+
+        with repo_scope(EmpireRepository) as repo:
             network = repo.get_network_stats()
             capability_map = repo.get_capability_map()
 
@@ -25,8 +24,6 @@ def network_overview():
                 network=network,
                 capability_map=capability_map,
             )
-        finally:
-            session.close()
     except Exception as e:
         return render_template("replication/network.html", network={}, capability_map={}, error=str(e))
 
@@ -35,21 +32,19 @@ def network_overview():
 def list_empires():
     """List all empires in the network."""
     try:
-        from db.engine import get_session
+        from db.engine import repo_scope
         from db.repositories.empire import EmpireRepository
-        session = get_session()
-        try:
-            repo = EmpireRepository(session)
+
+        with repo_scope(EmpireRepository) as repo:
             empires = repo.get_active()
             return jsonify([
                 {"id": e.id, "name": e.name, "domain": e.domain, "status": e.status,
                  "tasks": e.total_tasks_completed, "cost": e.total_cost_usd, "knowledge": e.total_knowledge_entries}
                 for e in empires
             ])
-        finally:
-            session.close()
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @replication_bp.route("/generate", methods=["POST"])
@@ -115,7 +110,8 @@ def sync_empires():
             "success": result.success,
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @replication_bp.route("/sync-status")
@@ -128,4 +124,5 @@ def sync_status():
         statuses = bridge.get_sync_status(empire_id)
         return jsonify([s.__dict__ for s in statuses])
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500

@@ -103,4 +103,5 @@ def run_migrations():
             "status": runner.get_status(),
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500

@@ -42,14 +42,10 @@ def lieutenant_detail(lieutenant_id: str):
     empire_id = current_app.config.get("EMPIRE_ID", "")
 
     try:
-        from core.lieutenant.manager import LieutenantManager
-        from db.engine import get_session
+        from db.engine import repo_scope
         from db.repositories.lieutenant import LieutenantRepository
 
-        session = get_session()
-        try:
-            repo = LieutenantRepository(session)
-
+        with repo_scope(LieutenantRepository) as repo:
             lt = repo.get(lieutenant_id)
             if not lt:
                 return jsonify({"error": "Lieutenant not found"}), 404
@@ -72,11 +68,9 @@ def lieutenant_detail(lieutenant_id: str):
                 task_stats=task_stats,
                 cost_breakdown=cost_breakdown,
             )
-        finally:
-            session.close()
     except Exception as e:
         logger.error("Lieutenant detail error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @lieutenants_bp.route("/create", methods=["POST"])
@@ -153,7 +147,8 @@ def lieutenant_research(lieutenant_id: str):
         return jsonify(result.to_dict())
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @lieutenants_bp.route("/templates")

@@ -6,7 +6,6 @@ then proposes improvements to the lieutenant's persona and prompts.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -163,16 +162,8 @@ Respond as JSON:
             response = router.execute(request, TaskMetadata(task_type="analysis", complexity="complex"))
 
             # Parse response
-            from llm.schemas import _find_json_object, _extract_json_block
-            raw = response.content
-            data = {}
-            for attempt in [raw, _extract_json_block(raw), _find_json_object(raw)]:
-                if attempt:
-                    try:
-                        data = json.loads(attempt)
-                        break
-                    except (json.JSONDecodeError, TypeError):
-                        continue
+            from llm.schemas import safe_json_loads
+            data = safe_json_loads(response.content)
 
             if not data.get("proposed_prompt"):
                 return None

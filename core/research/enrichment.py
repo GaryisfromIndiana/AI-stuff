@@ -238,13 +238,9 @@ class ShallowEnricher:
             result["cost_usd"] = response.cost_usd
 
             # Parse response
-            import json
-            text = response.content
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                enrichment = json.loads(text[start:end])
-            else:
+            from llm.schemas import safe_json_loads
+            enrichment = safe_json_loads(response.content)
+            if not enrichment:
                 return result
 
             # Step 3: Apply enrichment to knowledge graph

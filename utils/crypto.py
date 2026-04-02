@@ -89,8 +89,17 @@ def hmac_verify(message: str, key: str, signature: str, algorithm: str = "sha256
     return hmac.compare_digest(expected, signature)
 
 
+def _get_token_key() -> str:
+    """Get the signing key for tokens (uses Flask secret key or fallback)."""
+    try:
+        from config.settings import get_settings
+        return get_settings().flask_secret_key
+    except Exception:
+        return "empire-fallback-key"
+
+
 def generate_token(payload: str = "", ttl_seconds: int = 3600) -> str:
-    """Generate a simple time-limited token.
+    """Generate an HMAC-signed time-limited token.
 
     Args:
         payload: Optional payload to include.
@@ -101,12 +110,13 @@ def generate_token(payload: str = "", ttl_seconds: int = 3600) -> str:
     """
     timestamp = str(int(time.time()) + ttl_seconds)
     random_part = secrets.token_hex(16)
-    raw = f"{timestamp}:{payload}:{random_part}"
-    return raw
+    data = f"{timestamp}:{payload}:{random_part}"
+    sig = hmac_sign(data, _get_token_key())
+    return f"{data}:{sig}"
 
 
 def validate_token(token: str) -> tuple[bool, str]:
-    """Validate a time-limited token.
+    """Validate an HMAC-signed time-limited token.
 
     Args:
         token: Token to validate.
@@ -115,12 +125,20 @@ def validate_token(token: str) -> tuple[bool, str]:
         Tuple of (valid, payload).
     """
     try:
-        parts = token.split(":", 2)
-        if len(parts) < 3:
+        parts = token.rsplit(":", 1)
+        if len(parts) != 2:
             return False, ""
 
-        expiry = int(parts[0])
-        payload = parts[1]
+        data, sig = parts
+        if not hmac_verify(data, _get_token_key(), sig):
+            return False, ""
+
+        data_parts = data.split(":", 2)
+        if len(data_parts) < 3:
+            return False, ""
+
+        expiry = int(data_parts[0])
+        payload = data_parts[1]
 
         if time.time() > expiry:
             return False, ""

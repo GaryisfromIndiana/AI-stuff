@@ -294,12 +294,8 @@ Respond as JSON:
                 )
                 response = router.execute(request, TaskMetadata(task_type="analysis", complexity="moderate"))
 
-                try:
-                    data = json.loads(response.content)
-                except json.JSONDecodeError:
-                    from llm.schemas import _find_json_object
-                    json_str = _find_json_object(response.content)
-                    data = json.loads(json_str) if json_str else {}
+                from llm.schemas import safe_json_loads
+                data = safe_json_loads(response.content)
 
                 arguments.append(Argument(
                     lieutenant_id=participant.get("id", ""),
@@ -381,12 +377,8 @@ Respond as JSON:
                 )
                 response = router.execute(request, TaskMetadata(task_type="analysis"))
 
-                try:
-                    data = json.loads(response.content)
-                except json.JSONDecodeError:
-                    from llm.schemas import _find_json_object
-                    json_str = _find_json_object(response.content)
-                    data = json.loads(json_str) if json_str else {}
+                from llm.schemas import safe_json_loads
+                data = safe_json_loads(response.content)
 
                 for reb_data in data.get("rebuttals", []):
                     rebuttals.append(Rebuttal(
@@ -451,11 +443,10 @@ Return valid JSON only:
         )
         response = router.execute(request, TaskMetadata(task_type="analysis", complexity="moderate"))
 
-        try:
-            data = json.loads(response.content)
-        except json.JSONDecodeError:
-            from llm.schemas import _find_json_object
-            # Try finding JSON array
+        from llm.schemas import safe_json_loads
+        data = safe_json_loads(response.content, default=None)
+        if data is None:
+            # Try finding JSON array (scoring returns a list, not an object)
             text = response.content
             start = text.find("[")
             end = text.rfind("]") + 1
@@ -565,16 +556,10 @@ Return valid JSON:
         )
         response = router.execute(request, TaskMetadata(task_type="analysis", complexity="simple"))
 
-        try:
-            data = json.loads(response.content)
-        except json.JSONDecodeError:
-            text = response.content
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                data = json.loads(text[start:end])
-            else:
-                raise ValueError("Could not parse consensus response")
+        from llm.schemas import safe_json_loads
+        data = safe_json_loads(response.content)
+        if not data:
+            raise ValueError("Could not parse consensus response")
 
         return ConsensusCheck(
             reached=bool(data.get("reached", False)),

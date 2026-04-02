@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import hashlib
 from typing import Any
@@ -25,13 +26,13 @@ def estimate_tokens(text: str, chars_per_token: int = 4) -> int:
 
 
 def extract_json_block(text: str) -> str | None:
-    """Extract JSON from a markdown code block."""
-    patterns = [r"```json\s*\n(.*?)\n```", r"```\s*\n(\{.*?\})\n```"]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-    return None
+    """Extract JSON from a markdown code block or mixed LLM output.
+
+    Delegates to llm.schemas for robust extraction with brace matching.
+    """
+    from llm.schemas import safe_json_loads
+    result = safe_json_loads(text)
+    return json.dumps(result) if result else None
 
 
 def normalize_whitespace(text: str) -> str:

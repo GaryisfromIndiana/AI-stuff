@@ -91,24 +91,6 @@ class KnowledgeGraph:
 
     def __init__(self, empire_id: str = ""):
         self.empire_id = empire_id
-        self._repo = None
-
-    def _get_repo(self):
-        """Get a fresh repository with its own session.
-
-        IMPORTANT: Caller must close the session via repo.session.close()
-        or use _repo_scope() instead.
-        """
-        from db.engine import get_session
-        from db.repositories.knowledge import KnowledgeRepository
-        return KnowledgeRepository(get_session())
-
-    def _close_repo(self, repo) -> None:
-        """Close the session owned by a repository."""
-        try:
-            repo.session.close()
-        except Exception:
-            pass
 
     def add_entity(
         self,
@@ -139,9 +121,10 @@ class KnowledgeGraph:
             Created entity as dict.
         """
         from datetime import datetime, timezone
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
 
-        repo = self._get_repo()
-        try:
+        with repo_scope(KnowledgeRepository) as repo:
             # Enrich attributes with temporal data
             enriched_attrs = dict(attributes or {})
             if valid_from:
@@ -168,15 +151,6 @@ class KnowledgeGraph:
                 repo.commit()
                 return {"id": existing.id, "name": name, "action": "updated"}
 
-            # Generate embedding for semantic search
-            embedding = None
-            try:
-                from core.memory.embeddings import generate_embedding
-                embed_text = f"{name}: {description}" if description else name
-                embedding = generate_embedding(embed_text)
-            except Exception:
-                pass
-
             entity = repo.create(
                 empire_id=self.empire_id,
                 entity_type=entity_type,
@@ -186,35 +160,17 @@ class KnowledgeGraph:
                 confidence=confidence,
                 source_task_id=source_task_id or None,
                 tags_json=tags or [],
-                embedding_json=embedding,
             )
             repo.commit()
-
-            # Upsert into Qdrant
-            if embedding:
-                try:
-                    from core.vector.store import VectorStore
-                    vs = VectorStore.get_instance(self.empire_id)
-                    vs.upsert_entity(
-                        entity_id=entity.id,
-                        embedding=embedding,
-                        empire_id=self.empire_id,
-                        entity_type=entity_type,
-                        name=name,
-                        importance=confidence,
-                    )
-                except Exception:
-                    pass
-
             return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}
-        finally:
-            self._close_repo(repo)
 
     def update_entity(self, name: str, description: str = "", **kwargs) -> bool:
         """Update an existing entity's description or other fields."""
         from datetime import datetime, timezone
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             entity = repo.get_by_name(name, self.empire_id)
             if not entity:
                 return False
@@ -225,14 +181,14 @@ class KnowledgeGraph:
             repo.update(entity.id, **update_fields)
             repo.commit()
             return True
-        finally:
-            self._close_repo(repo)
 
     def update_entity_attributes(self, name: str, attributes: dict) -> bool:
         """Merge new attributes into an existing entity's attributes."""
         from datetime import datetime, timezone
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             entity = repo.get_by_name(name, self.empire_id)
             if not entity:
                 return False
@@ -241,13 +197,13 @@ class KnowledgeGraph:
             repo.update(entity.id, attributes_json=merged, updated_at=datetime.now(timezone.utc))
             repo.commit()
             return True
-        finally:
-            self._close_repo(repo)
 
     def boost_confidence(self, name: str, amount: float = 0.05) -> bool:
         """Boost an entity's confidence score by a small amount."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             entity = repo.get_by_name(name, self.empire_id)
             if not entity:
                 return False
@@ -255,8 +211,6 @@ class KnowledgeGraph:
             repo.update(entity.id, confidence=new_confidence)
             repo.commit()
             return True
-        finally:
-            self._close_repo(repo)
 
     # Bidirectional relation labels
     INVERSE_RELATIONS: dict[str, str] = {
@@ -320,8 +274,10 @@ class KnowledgeGraph:
         source_id, _ = resolver.resolve_and_get_id(source_name)
         target_id, _ = resolver.resolve_and_get_id(target_name)
 
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             if not source_id:
                 source = repo.get_by_name(source_name, self.empire_id)
                 source_id = source.id if source else ""
@@ -362,8 +318,6 @@ class KnowledgeGraph:
                 "type": relation_type,
                 "inverse": inverse,
             }
-        finally:
-            self._close_repo(repo)
 
     def find_entities(
         self,
@@ -373,8 +327,10 @@ class KnowledgeGraph:
         limit: int = 20,
     ) -> list[GraphNode]:
         """Find entities matching a query."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             if query:
                 entities = repo.search_entities(query, self.empire_id, entity_type or None, limit)
             else:
@@ -392,8 +348,6 @@ class KnowledgeGraph:
                 )
                 for e in entities
             ]
-        finally:
-            self._close_repo(repo)
 
     def get_neighbors(
         self,
@@ -402,8 +356,10 @@ class KnowledgeGraph:
         relation_types: list[str] | None = None,
     ) -> list[GraphNode]:
         """Get neighboring entities up to max_depth."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             entity = repo.get_by_name(entity_name, self.empire_id)
             if not entity:
                 return []
@@ -421,8 +377,6 @@ class KnowledgeGraph:
                 )
                 for n in neighbors_data
             ]
-        finally:
-            self._close_repo(repo)
 
     def find_path(
         self,
@@ -431,8 +385,10 @@ class KnowledgeGraph:
         max_depth: int = 5,
     ) -> list[dict] | None:
         """Find shortest path between two entities."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             source = repo.get_by_name(source_name, self.empire_id)
             target = repo.get_by_name(target_name, self.empire_id)
 
@@ -440,8 +396,6 @@ class KnowledgeGraph:
                 return None
 
             return repo.find_path(source.id, target.id, max_depth)
-        finally:
-            self._close_repo(repo)
 
     def get_subgraph(
         self,
@@ -451,8 +405,10 @@ class KnowledgeGraph:
         """Extract a subgraph centered on an entity."""
         neighbors = self.get_neighbors(center_name, max_depth=depth)
 
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             center = repo.get_by_name(center_name, self.empire_id)
 
             nodes = []
@@ -488,13 +444,13 @@ class KnowledgeGraph:
                 edges=edges,
                 center_entity_id=center.id if center else "",
             )
-        finally:
-            self._close_repo(repo)
 
     def get_central_entities(self, limit: int = 10) -> list[GraphNode]:
         """Get the most connected/important entities."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             most_connected = repo.get_most_connected(self.empire_id, limit)
 
             return [
@@ -509,8 +465,6 @@ class KnowledgeGraph:
                 for mc in most_connected
                 if mc["entity"]
             ]
-        finally:
-            self._close_repo(repo)
 
     def compute_pagerank(self, damping: float = 0.85, iterations: int = 20) -> dict[str, float]:
         """Compute PageRank-style importance scores for all entities.
@@ -522,8 +476,10 @@ class KnowledgeGraph:
         Returns:
             Dict of entity_id → importance score.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             from sqlalchemy import select
             from sqlalchemy.orm import joinedload
             from db.models import KnowledgeEntity
@@ -563,15 +519,13 @@ class KnowledgeGraph:
                     new_scores[eid] = rank
                 scores = new_scores
 
-            # Update importance scores in DB
+            # Normalize scores to [0, 1] range
             max_score = max(scores.values()) if scores else 1.0
             for eid, score in scores.items():
-                repo.update_importance(eid, min(1.0, score / max_score))
+                repo.update_importance(eid, min(1.0, score / max_score) if max_score > 0 else 0.0)
 
             repo.commit()
             return scores
-        finally:
-            self._close_repo(repo)
 
     def merge_entities(self, entity_names: list[str]) -> dict | None:
         """Merge duplicate entities into one.
@@ -581,8 +535,10 @@ class KnowledgeGraph:
         if len(entity_names) < 2:
             return None
 
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             from sqlalchemy import select, and_
             from sqlalchemy.orm import joinedload
             from db.models import KnowledgeEntity
@@ -648,23 +604,23 @@ class KnowledgeGraph:
                 "merged": [o.id for o in others],
                 "name": primary.name,
             }
-        finally:
-            self._close_repo(repo)
 
     def prune(self, min_confidence: float = 0.2, min_connections: int = 0) -> int:
         """Remove low-quality entities."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             count = repo.prune_low_quality(self.empire_id, min_confidence, min_connections)
             repo.commit()
             return count
-        finally:
-            self._close_repo(repo)
 
     def get_stats(self) -> GraphStats:
         """Get knowledge graph statistics."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             raw = repo.get_graph_stats(self.empire_id)
 
             return GraphStats(
@@ -674,13 +630,13 @@ class KnowledgeGraph:
                 avg_connections=raw.get("avg_connections", 0),
                 avg_confidence=raw.get("avg_confidence", 0),
             )
-        finally:
-            self._close_repo(repo)
 
     def export_graph(self) -> dict:
         """Export the graph for sharing or visualization."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        with repo_scope(KnowledgeRepository) as repo:
             from sqlalchemy import select
             from sqlalchemy.orm import joinedload
             from db.models import KnowledgeEntity, KnowledgeRelation
@@ -715,8 +671,6 @@ class KnowledgeGraph:
                     })
 
             return {"nodes": nodes, "edges": edges, "empire_id": self.empire_id}
-        finally:
-            self._close_repo(repo)
 
     def import_graph(self, data: dict) -> dict:
         """Import a graph from exported data."""

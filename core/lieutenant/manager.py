@@ -10,6 +10,7 @@ from typing import Any, Optional
 from core.ace.engine import ACEEngine
 from core.lieutenant.base import Lieutenant, PerformanceStats
 from core.lieutenant.persona import PersonaConfig, create_persona, PERSONA_TEMPLATES
+from db.engine import repo_scope
 
 logger = logging.getLogger(__name__)
 
@@ -47,20 +48,6 @@ class LieutenantManager:
         self._lieutenants: dict[str, Lieutenant] = {}  # In-memory instance cache
         self._lt_list_cache: list[dict] | None = None  # Cached list results
         self._cache_timestamp: float = 0.0
-        self._repo = None
-
-    def _get_repo(self):
-        """Get a fresh repository with its own session."""
-        from db.engine import get_session
-        from db.repositories.lieutenant import LieutenantRepository
-        return LieutenantRepository(get_session())
-
-    def _close_repo(self, repo) -> None:
-        """Close the session owned by a repository."""
-        try:
-            repo.session.close()
-        except Exception:
-            pass
 
     def create_lieutenant(
         self,
@@ -88,9 +75,8 @@ class LieutenantManager:
             else:
                 persona = PersonaConfig(name=name, role="AI Assistant", domain=domain or "general")
 
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             db_lt = repo.create(
                 empire_id=self.empire_id,
                 name=name,
@@ -101,9 +87,6 @@ class LieutenantManager:
                 status="active",
             )
             repo.commit()
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
         lt = Lieutenant(
             lieutenant_id=db_lt.id,
@@ -123,9 +106,8 @@ class LieutenantManager:
         if lieutenant_id in self._lieutenants:
             return self._lieutenants[lieutenant_id]
 
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             db_lt = repo.get(lieutenant_id)
             if db_lt is None:
                 return None
@@ -141,9 +123,6 @@ class LieutenantManager:
             )
             self._lieutenants[lieutenant_id] = lt
             return lt
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
     def list_lieutenants(
         self,
@@ -161,9 +140,8 @@ class LieutenantManager:
         ):
             return self._lt_list_cache
 
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             db_lts = repo.get_by_empire(self.empire_id, status=status, domain=domain)
             real_costs = repo.get_real_costs_bulk([lt.id for lt in db_lts])
 
@@ -181,9 +159,6 @@ class LieutenantManager:
                 }
                 for lt in db_lts
             ]
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
         # Cache unfiltered results
         if not status and not domain:
@@ -199,46 +174,34 @@ class LieutenantManager:
 
     def activate_lieutenant(self, lieutenant_id: str) -> bool:
         """Activate an inactive lieutenant."""
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             result = repo.update(lieutenant_id, status="active")
             if result:
                 repo.commit()
             return result is not None
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
     def deactivate_lieutenant(self, lieutenant_id: str) -> bool:
         """Deactivate a lieutenant."""
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             result = repo.update(lieutenant_id, status="inactive")
             if result:
                 repo.commit()
             if lieutenant_id in self._lieutenants:
                 del self._lieutenants[lieutenant_id]
             return result is not None
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
     def delete_lieutenant(self, lieutenant_id: str) -> bool:
         """Delete a lieutenant permanently."""
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             result = repo.delete(lieutenant_id)
             if result:
                 repo.commit()
             if lieutenant_id in self._lieutenants:
                 del self._lieutenants[lieutenant_id]
             return result
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
     def find_best_lieutenant(self, task_description: str, task_type: str = "") -> Lieutenant | None:
         """Find the best lieutenant for a task with load balancing.
@@ -247,9 +210,8 @@ class LieutenantManager:
         Lieutenants with many more tasks than average get penalized to
         distribute work evenly across the fleet.
         """
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             active_lts = repo.get_by_empire(self.empire_id, status="active")
 
             if not active_lts:
@@ -309,9 +271,6 @@ class LieutenantManager:
                 if score > best_score:
                     best_score = score
                     best_lt = db_lt
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
         if best_lt:
             return self.get_lieutenant(best_lt.id)
@@ -323,9 +282,8 @@ class LieutenantManager:
 
     def get_available_lieutenants(self, capabilities: list[str] | None = None) -> list[Lieutenant]:
         """Get all available (active and idle) lieutenants."""
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             idle = repo.get_idle_lieutenants(self.empire_id)
 
             lieutenants = []
@@ -339,15 +297,11 @@ class LieutenantManager:
                     lieutenants.append(lt)
 
             return lieutenants
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
     def run_all_learning_cycles(self) -> dict:
         """Run learning cycles for all lieutenants that need them."""
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             due = repo.needs_learning(self.empire_id)
 
             results = {"lieutenants_processed": 0, "total_gaps": 0, "total_researched": 0}
@@ -365,15 +319,11 @@ class LieutenantManager:
             repo.commit()
             logger.info("Learning cycles complete: %s", results)
             return results
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
     def get_fleet_stats(self) -> FleetStats:
         """Get fleet-level statistics."""
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             summary = repo.get_fleet_summary(self.empire_id)
 
             # Count lieutenants per domain
@@ -392,9 +342,6 @@ class LieutenantManager:
                 avg_performance=summary.get("avg_performance", 0),
                 total_cost=summary.get("total_cost_usd", 0),
             )
-        finally:
-            if repo is not None:
-                self._close_repo(repo)
 
     def clone_lieutenant(
         self,
@@ -434,9 +381,8 @@ class LieutenantManager:
         execution_time: float = 0.0,
     ) -> None:
         """Update lieutenant performance after a task."""
-        repo = None
-        try:
-            repo = self._get_repo()
+        from db.repositories.lieutenant import LieutenantRepository
+        with repo_scope(LieutenantRepository) as repo:
             repo.update_performance(
                 lieutenant_id=lieutenant_id,
                 task_succeeded=task_succeeded,
@@ -445,6 +391,3 @@ class LieutenantManager:
                 execution_time=execution_time,
             )
             repo.commit()
-        finally:
-            if repo is not None:
-                self._close_repo(repo)

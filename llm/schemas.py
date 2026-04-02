@@ -38,26 +38,6 @@ class PlanningOutput(BaseModel):
     wave_structure: list[list[int]] = Field(default_factory=list)  # Groups of step numbers per wave
 
 
-class DirectivePlan(BaseModel):
-    """Plan for a full directive with wave structure."""
-    directive_id: str = ""
-    summary: str
-    waves: list[WavePlan] = Field(default_factory=list)
-    total_estimated_cost: float = 0.0
-    total_estimated_tokens: int = 0
-    assigned_lieutenants: list[str] = Field(default_factory=list)
-    dependencies: list[dict] = Field(default_factory=list)
-    milestones: list[str] = Field(default_factory=list)
-
-
-class WavePlan(BaseModel):
-    """Plan for a single execution wave."""
-    wave_number: int
-    description: str
-    tasks: list[TaskPlan] = Field(default_factory=list)
-    dependencies: list[int] = Field(default_factory=list)  # Wave numbers this depends on
-
-
 class TaskPlan(BaseModel):
     """Plan for a single task within a wave."""
     title: str
@@ -68,6 +48,26 @@ class TaskPlan(BaseModel):
     estimated_cost: float = 0.0
     model_recommendation: str = ""
     dependencies: list[str] = Field(default_factory=list)  # Task titles this depends on
+
+
+class WavePlan(BaseModel):
+    """Plan for a single execution wave."""
+    wave_number: int
+    description: str
+    tasks: list[TaskPlan] = Field(default_factory=list)
+    dependencies: list[int] = Field(default_factory=list)  # Wave numbers this depends on
+
+
+class DirectivePlan(BaseModel):
+    """Plan for a full directive with wave structure."""
+    directive_id: str = ""
+    summary: str
+    waves: list[WavePlan] = Field(default_factory=list)
+    total_estimated_cost: float = 0.0
+    total_estimated_tokens: int = 0
+    assigned_lieutenants: list[str] = Field(default_factory=list)
+    dependencies: list[dict] = Field(default_factory=list)
+    milestones: list[str] = Field(default_factory=list)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -258,6 +258,24 @@ class RetrospectiveOutput(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════
 # Schema utilities
 # ═══════════════════════════════════════════════════════════════════════════
+
+def safe_json_loads(content: str, default: dict | None = None) -> dict:
+    """Parse JSON from LLM output with fallback extraction.
+
+    Tries direct parse, then markdown code block extraction, then brace matching.
+    """
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    json_str = _extract_json_block(content) or _find_json_object(content)
+    if json_str:
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+    return default if default is not None else {}
+
 
 def pydantic_to_tool_schema(model_class: type[BaseModel], description: str = "") -> dict:
     """Convert a Pydantic model to an LLM tool/function schema.

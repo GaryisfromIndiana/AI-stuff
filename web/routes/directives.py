@@ -50,11 +50,10 @@ def directive_detail(directive_id: str):
         progress = dm.get_progress(directive_id)
         cost = dm.get_cost_summary(directive_id)
 
-        from db.engine import get_session
+        from db.engine import repo_scope
         from db.repositories.directive import DirectiveRepository
-        session = get_session()
-        try:
-            dir_repo = DirectiveRepository(session)
+
+        with repo_scope(DirectiveRepository) as dir_repo:
             timeline = dir_repo.get_timeline(directive_id)
             tasks_by_wave = dir_repo.get_with_tasks(directive_id)
 
@@ -66,8 +65,6 @@ def directive_detail(directive_id: str):
                 timeline=timeline,
                 tasks_by_wave=tasks_by_wave.get("tasks_by_wave", {}),
             )
-        finally:
-            session.close()
     except Exception as e:
         return str(e), 500
 
@@ -107,7 +104,8 @@ def execute_directive(directive_id: str):
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @directives_bp.route("/<directive_id>/cancel", methods=["POST"])

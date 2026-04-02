@@ -9,7 +9,6 @@ Old memories are archived (importance reduced to near-zero) after compression.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
@@ -224,16 +223,8 @@ Respond as JSON:
             response = router.execute(request, TaskMetadata(task_type="analysis", complexity="moderate"))
 
             # Parse response
-            from llm.schemas import _find_json_object, _extract_json_block
-            raw = response.content
-            data = {}
-            for attempt in [raw, _extract_json_block(raw), _find_json_object(raw)]:
-                if attempt:
-                    try:
-                        data = json.loads(attempt)
-                        break
-                    except (json.JSONDecodeError, TypeError):
-                        continue
+            from llm.schemas import safe_json_loads
+            data = safe_json_loads(response.content)
 
             if not data.get("summary"):
                 data = {"title": f"Compressed: {cluster.category}", "summary": response.content}
@@ -266,7 +257,6 @@ Respond as JSON:
             # Archive the original memories (reduce importance dramatically)
             self._archive_originals(cluster.memories)
 
-            cluster.total_words = sum(len(m.get("content", "").split()) for m in cluster.memories)
             summary_words = len(summary_content.split())
             logger.info(
                 "Compressed %d memories → '%s' (%d words → %d words)",

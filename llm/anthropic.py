@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-import time
-from typing import Any, Generator
+import random
+from typing import Any, Generator, Optional
 
 import anthropic
 
@@ -17,13 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 class AnthropicClient(LLMClient):
-    """Client for the Anthropic Claude API.
-
-    Supports completions, streaming, tool use, and automatic retries
-    with exponential backoff on transient errors.
-    """
+    """Client for the Anthropic Claude API."""
 
     provider_name = "anthropic"
+    _max_retries = 5
 
     def __init__(self, api_key: str | None = None):
         super().__init__()
@@ -32,20 +29,11 @@ class AnthropicClient(LLMClient):
             api_key = get_settings().anthropic_api_key
         self.client = anthropic.Anthropic(api_key=api_key)
         self._default_model = "claude-sonnet-4-20250514"
-        # Tighter rate limits to avoid 429s (shared across threads in this worker)
         from llm.base import RateLimiter
         self._rate_limiter = RateLimiter(requests_per_minute=30, tokens_per_minute=80_000)
 
-    def complete(self, request: LLMRequest) -> LLMResponse:
-        """Send a completion request to Claude.
-
-        Args:
-            request: The LLM request.
-
-        Returns:
-            LLM response with content, cost, and usage stats.
-        """
-        model = request.model or self._default_model
+    def _call_provider(self, request: LLMRequest, model: str) -> Any:
+        """Build kwargs and call the Anthropic messages API."""
         messages = self._format_messages(request.messages)
 
         kwargs: dict[str, Any] = {
@@ -66,115 +54,71 @@ class AnthropicClient(LLMClient):
                 elif request.tool_choice == "required":
                     kwargs["tool_choice"] = {"type": "any"}
                 elif request.tool_choice == "none":
-                    pass  # Don't send tool_choice
+                    pass
                 else:
                     kwargs["tool_choice"] = {"type": "tool", "name": request.tool_choice}
 
         if request.stop_sequences:
             kwargs["stop_sequences"] = request.stop_sequences
 
-        start_time = time.time()
-        last_error = None
+        return self.client.messages.create(**kwargs)
 
-        # Rate limiter enforcement — wait if needed before making request
-        estimated_tokens = sum(len(m.content) // 4 for m in request.messages) + request.max_tokens
-        _rl_wait_total = 0.0
-        _rl_wait_loops = 0
-        while not self._rate_limiter.can_proceed(estimated_tokens):
-            wait = self._rate_limiter.wait_time()
-            if wait > 0:
-                logger.debug("Rate limit backpressure: waiting %.1fs", wait)
-                _sleep_for = min(wait, 5.0)
-                _rl_wait_total += _sleep_for
-                _rl_wait_loops += 1
-                time.sleep(_sleep_for)
-            else:
-                break
-        for attempt in range(5):
-            try:
-                response = self.client.messages.create(**kwargs)
-                latency_ms = (time.time() - start_time) * 1000
+    def _parse_response(self, raw: Any, model: str, latency_ms: float) -> LLMResponse:
+        """Parse an Anthropic response into LLMResponse."""
+        content = ""
+        tool_calls = []
 
-                content = ""
-                tool_calls = []
+        for block in raw.content:
+            if block.type == "text":
+                content += block.text
+            elif block.type == "tool_use":
+                tool_calls.append(ToolCall(
+                    id=block.id,
+                    name=block.name,
+                    arguments=block.input if isinstance(block.input, dict) else {},
+                ))
 
-                for block in response.content:
-                    if block.type == "text":
-                        content += block.text
-                    elif block.type == "tool_use":
-                        tool_calls.append(ToolCall(
-                            id=block.id,
-                            name=block.name,
-                            arguments=block.input if isinstance(block.input, dict) else {},
-                        ))
+        finish_reason = "stop"
+        if raw.stop_reason == "tool_use":
+            finish_reason = "tool_calls"
+        elif raw.stop_reason == "max_tokens":
+            finish_reason = "length"
 
-                finish_reason = "stop"
-                if response.stop_reason == "tool_use":
-                    finish_reason = "tool_calls"
-                elif response.stop_reason == "max_tokens":
-                    finish_reason = "length"
+        tokens_in = raw.usage.input_tokens if raw.usage else 0
+        tokens_out = raw.usage.output_tokens if raw.usage else 0
 
-                if response.usage:
-                    tokens_in = response.usage.input_tokens
-                    tokens_out = response.usage.output_tokens
-                else:
-                    tokens_in = 0
-                    tokens_out = 0
-                cost = self._calculate_cost(model, tokens_in, tokens_out)
+        return LLMResponse(
+            content=content,
+            model=model,
+            provider="anthropic",
+            tokens_input=tokens_in,
+            tokens_output=tokens_out,
+            cost_usd=self._calculate_cost(model, tokens_in, tokens_out),
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            latency_ms=latency_ms,
+            raw_response=raw,
+        )
 
-                llm_response = LLMResponse(
-                    content=content,
-                    model=model,
-                    provider="anthropic",
-                    tokens_input=tokens_in,
-                    tokens_output=tokens_out,
-                    cost_usd=cost,
-                    tool_calls=tool_calls,
-                    finish_reason=finish_reason,
-                    latency_ms=latency_ms,
-                    raw_response=response,
-                )
-                self._record_usage(llm_response)
-                return llm_response
-
-            except anthropic.RateLimitError as e:
-                last_error = e
-                import random
-                # Exponential backoff with jitter to avoid thundering herd
-                base_wait = min(2 ** attempt * 5, 60)
-                jitter = random.uniform(0, base_wait * 0.5)
-                wait = base_wait + jitter
-                logger.warning("Rate limited by Anthropic, waiting %.1fs (attempt %d)", wait, attempt + 1)
-                time.sleep(wait)
-
-            except anthropic.InternalServerError as e:
-                last_error = e
-                wait = min(2 ** attempt * 3, 60)
-                logger.warning("Anthropic server error, waiting %ds (attempt %d)", wait, attempt + 1)
-                time.sleep(wait)
-
-            except anthropic.APIStatusError as e:
-                self._errors += 1
-                logger.error("Anthropic API error: %s", e)
-                raise
-
-            except Exception as e:
-                self._errors += 1
-                logger.error("Unexpected error calling Anthropic: %s", e)
-                raise
-
-        self._errors += 1
-        raise last_error or RuntimeError("Failed after retries")
+    def _classify_error(self, error: Exception, attempt: int) -> Optional[float]:
+        """Classify Anthropic errors for retry decisions."""
+        if isinstance(error, anthropic.RateLimitError):
+            base_wait = min(2 ** attempt * 5, 60)
+            jitter = random.uniform(0, base_wait * 0.5)
+            logger.warning("Rate limited by Anthropic, waiting %.1fs (attempt %d)", base_wait + jitter, attempt + 1)
+            return base_wait + jitter
+        if isinstance(error, anthropic.InternalServerError):
+            wait = min(2 ** attempt * 3, 60)
+            logger.warning("Anthropic server error, waiting %ds (attempt %d)", wait, attempt + 1)
+            return float(wait)
+        if isinstance(error, anthropic.APIStatusError):
+            logger.error("Anthropic API error: %s", error)
+            return None
+        logger.error("Unexpected error calling Anthropic: %s", error)
+        return None
 
     def stream(self, request: LLMRequest) -> Generator[StreamChunk, None, None]:
-        """Stream a completion response from Claude.
-
-        Args:
-            request: The LLM request.
-
-        Yields:
-            StreamChunk instances with content deltas.
-        """
+        """Stream a completion response from Claude."""
         model = request.model or self._default_model
         messages = self._format_messages(request.messages)
 
@@ -205,23 +149,18 @@ class AnthropicClient(LLMClient):
                         elif event.type == "message_stop":
                             yield StreamChunk(is_final=True, finish_reason="stop")
 
-                # Record usage from the final message
                 final = stream.get_final_message()
                 if final and final.usage:
                     tokens_in = final.usage.input_tokens
                     tokens_out = final.usage.output_tokens
-                else:
-                    tokens_in = 0
-                    tokens_out = 0
-                cost = self._calculate_cost(model, tokens_in, tokens_out)
-                self._record_usage(LLMResponse(
-                    content="",
-                    model=model,
-                    provider="anthropic",
-                    tokens_input=tokens_in,
-                    tokens_output=tokens_out,
-                    cost_usd=cost,
-                ))
+                    self._record_usage(LLMResponse(
+                        content="",
+                        model=model,
+                        provider="anthropic",
+                        tokens_input=tokens_in,
+                        tokens_output=tokens_out,
+                        cost_usd=self._calculate_cost(model, tokens_in, tokens_out),
+                    ))
 
         except Exception as e:
             self._errors += 1
@@ -232,29 +171,31 @@ class AnthropicClient(LLMClient):
         """Format messages for the Anthropic API.
 
         Anthropic uses a different format: system prompt is separate,
-        and tool results have a specific structure. Multiple tool results
-        from one turn must be combined into a single user message.
+        and tool results have a specific structure. Consecutive tool
+        results are merged into a single user message as required by
+        the API.
         """
         formatted = []
 
         for msg in messages:
             if msg.role == "system":
-                continue  # System prompt handled separately
+                continue
 
             if msg.role == "tool":
-                # Merge consecutive tool results into one user message
-                tool_block = {
+                tool_result = {
                     "type": "tool_result",
                     "tool_use_id": msg.tool_call_id,
                     "content": msg.content,
                 }
-                if formatted and formatted[-1]["role"] == "user" and isinstance(formatted[-1]["content"], list) and formatted[-1]["content"] and formatted[-1]["content"][0].get("type") == "tool_result":
-                    formatted[-1]["content"].append(tool_block)
-                else:
-                    formatted.append({
-                        "role": "user",
-                        "content": [tool_block],
-                    })
+                if formatted and formatted[-1]["role"] == "user" and isinstance(formatted[-1]["content"], list):
+                    last_content = formatted[-1]["content"]
+                    if last_content and last_content[-1].get("type") == "tool_result":
+                        last_content.append(tool_result)
+                        continue
+                formatted.append({
+                    "role": "user",
+                    "content": [tool_result],
+                })
             elif msg.role == "assistant" and msg.tool_calls:
                 content_blocks: list[dict] = []
                 if msg.content:
@@ -277,12 +218,7 @@ class AnthropicClient(LLMClient):
         return tool.to_anthropic_schema()
 
     def count_tokens(self, text: str, model: str | None = None) -> int:
-        """Estimate token count for text.
-
-        Uses the Anthropic token counting API if available,
-        falls back to heuristic estimation.
-        """
-        # Anthropic SDK 0.40+ removed client.count_tokens(); use heuristic
+        """Estimate token count for text."""
         return estimate_tokens(text)
 
     def count_message_tokens(

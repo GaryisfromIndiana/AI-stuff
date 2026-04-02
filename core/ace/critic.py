@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from llm.base import LLMRequest, LLMMessage
 from llm.router import ModelRouter, TaskMetadata
-from llm.schemas import CriticOutput, QualityScore, parse_llm_output
+from llm.schemas import CriticOutput, QualityScore, parse_llm_output, safe_json_loads
 
 logger = logging.getLogger(__name__)
 
@@ -153,12 +152,7 @@ Respond as JSON:
             response = self.router.execute(request, TaskMetadata(task_type="analysis", complexity="moderate"))
 
             # Parse response
-            try:
-                data = json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                data = json.loads(json_str) if json_str else {}
+            data = safe_json_loads(response.content)
 
             overall = float(data.get("overall_score", 0.5))
             approved = data.get("approved", overall >= self._min_quality)
@@ -243,12 +237,7 @@ Respond as JSON:
             )
             response = self.router.execute(request, TaskMetadata(task_type="analysis"))
 
-            try:
-                data = json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                data = json.loads(json_str) if json_str else {}
+            data = safe_json_loads(response.content)
 
             return HallucinationCheck(
                 hallucination_score=float(data.get("hallucination_score", 0.3)),
@@ -309,12 +298,7 @@ Respond as JSON:
             )
             response = self.router.execute(request, TaskMetadata(task_type="analysis"))
 
-            try:
-                data = json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                data = json.loads(json_str) if json_str else {}
+            data = safe_json_loads(response.content)
 
             return CompletenessCheck(
                 completeness_score=float(data.get("completeness_score", 0.5)),

@@ -42,7 +42,7 @@
     - **Content Pipeline** — 5 report templates
     (briefing, deep dive, digest, competitive
     analysis, status report)
-    - **Scheduler Daemon** — 14 autonomous jobs
+    - **Scheduler Daemon** — 21 autonomous jobs
     including sweep, compression, quality scoring,
     decay
 
@@ -163,7 +163,7 @@
 
     Scheduler
 
-    GET  /scheduler/jobs          — List 14 autonomous
+    GET  /scheduler/jobs          — List 21 autonomous
      jobs
     POST /scheduler/tick          — Manual scheduler
     tick

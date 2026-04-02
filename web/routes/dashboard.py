@@ -12,178 +12,172 @@ logger = logging.getLogger(__name__)
 dashboard_bp = Blueprint("dashboard", __name__)
 
 
+def _fetch_dashboard_data(empire_id: str) -> dict:
+    """Collect all dashboard data. Shared by HTML and JSON endpoints."""
+    from db.engine import read_session
+    from db.repositories.empire import EmpireRepository
+    from db.repositories.directive import DirectiveRepository
+
+    with read_session() as session:
+        # Empire overview
+        empire_repo = EmpireRepository(session)
+        health = empire_repo.get_health_overview(empire_id)
+
+        # Directives
+        dir_repo = DirectiveRepository(session)
+        active_directives = [
+            {"id": d.id, "title": d.title, "status": d.status, "priority": d.priority}
+            for d in dir_repo.get_active(empire_id)
+        ]
+        recent_completed = [
+            {"id": d.id, "title": d.title, "quality": d.quality_score, "cost": d.total_cost_usd}
+            for d in dir_repo.get_completed(empire_id, days=30, limit=5)
+        ]
+
+        # Budget
+        budget_data = {}
+        try:
+            from core.routing.budget import BudgetManager
+            bm = BudgetManager(empire_id)
+            budget = bm.get_budget_report(days=30)
+            budget_data = {
+                "daily_spend": budget.daily_spend,
+                "monthly_spend": budget.monthly_spend,
+                "daily_remaining": budget.daily_remaining,
+                "monthly_remaining": budget.monthly_remaining,
+                "alerts": [{"message": a.message, "severity": a.severity} for a in budget.alerts],
+            }
+        except Exception as e:
+            logger.debug("Dashboard budget fetch failed: %s", e)
+
+        # Fleet stats
+        fleet_stats = []
+        try:
+            from db.repositories.lieutenant import LieutenantRepository
+            lt_repo = LieutenantRepository(session)
+            lts = lt_repo.get_by_empire(empire_id, status="active")
+            real_costs = lt_repo.get_real_costs_bulk([lt.id for lt in lts])
+            fleet_stats = [
+                {
+                    "name": lt.name,
+                    "domain": lt.domain,
+                    "performance": lt.performance_score,
+                    "tasks": lt.tasks_completed + lt.tasks_failed,
+                    "cost": real_costs.get(lt.id, 0.0),
+                }
+                for lt in sorted(lts, key=lambda x: x.performance_score, reverse=True)
+            ]
+        except Exception as e:
+            logger.debug("Dashboard fleet stats failed: %s", e)
+
+        # Latest research from memory
+        latest_research = []
+        try:
+            from core.memory.manager import MemoryManager
+            mm = MemoryManager(empire_id)
+            latest_research = mm.recall(query="research synthesis", memory_types=["semantic"], limit=5)
+        except Exception as e:
+            logger.debug("Dashboard memory fetch failed: %s", e)
+
+        # Knowledge graph highlights
+        knowledge_highlights = []
+        try:
+            from core.knowledge.graph import KnowledgeGraph
+            graph = KnowledgeGraph(empire_id)
+            central = graph.get_central_entities(limit=9)
+            knowledge_highlights = [
+                {"name": n.name, "type": n.entity_type, "confidence": n.confidence}
+                for n in central
+            ]
+        except Exception as e:
+            logger.debug("Dashboard knowledge fetch failed: %s", e)
+
+        # Scheduler status
+        scheduler_info = {}
+        try:
+            daemon = current_app.config.get("_SCHEDULER_DAEMON")
+            if daemon:
+                status = daemon.get_status()
+                scheduler_info = {
+                    "running": status.running,
+                    "total_ticks": status.total_ticks,
+                    "total_jobs": status.total_job_runs,
+                    "errors": status.errors,
+                }
+            if not scheduler_info.get("total_ticks"):
+                try:
+                    from datetime import datetime, timezone, timedelta
+                    from db.models import WarRoom, Task
+                    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+                    tick_check = session.execute(select(func.count(WarRoom.id)).where(
+                        WarRoom.created_at > one_hour_ago
+                    )).scalar() or 0
+                    task_check = session.execute(select(func.count(Task.id)).where(
+                        Task.created_at > one_hour_ago
+                    )).scalar() or 0
+                    if tick_check or task_check:
+                        scheduler_info["running"] = True
+                        scheduler_info["note"] = "Activity detected (stats from another worker)"
+                        scheduler_info["recent_war_rooms"] = tick_check
+                        scheduler_info["recent_tasks"] = task_check
+                except Exception as e:
+                    logger.debug("Dashboard tick check failed: %s", e)
+        except Exception as e:
+            logger.debug("Dashboard scheduler fetch failed: %s", e)
+
+        # Infrastructure stats
+        infra_stats = {}
+        try:
+            from llm.cache import get_cache
+            infra_stats["cache"] = get_cache().get_stats()
+        except Exception:
+            infra_stats["cache"] = {"enabled": False}
+        try:
+            from utils.circuit_breaker import get_all_circuit_stats
+            infra_stats["circuits"] = get_all_circuit_stats()
+        except Exception:
+            infra_stats["circuits"] = {}
+
+    return {
+        "health": health,
+        "scheduler": scheduler_info,
+        "fleet_stats": fleet_stats,
+        "active_directives": active_directives,
+        "recent_completed": recent_completed,
+        "budget": budget_data,
+        "latest_research": latest_research,
+        "knowledge_highlights": knowledge_highlights,
+        "infra": infra_stats,
+    }
+
+
 @dashboard_bp.route("/")
 def index():
     """Main dashboard page."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-
     try:
-        from db.engine import get_session
-        from db.repositories.empire import EmpireRepository
-        from db.repositories.directive import DirectiveRepository
+        data = _fetch_dashboard_data(empire_id)
 
-        session = get_session()
+        # Extra data only needed for the HTML template
         try:
-            # Empire overview
-            empire_repo = EmpireRepository(session)
-            health = empire_repo.get_health_overview(empire_id)
+            from core.search.feeds import FeedReader
+            reader = FeedReader(empire_id)
+            entries = reader.fetch_latest(max_total=5, max_per_feed=2)
+            data["latest_feeds"] = [
+                {"title": e.title, "url": e.url, "summary": e.summary, "source": e.source_feed}
+                for e in entries
+            ]
+        except Exception:
+            data["latest_feeds"] = []
 
-            # Directives
-            dir_repo = DirectiveRepository(session)
-            active_directives = dir_repo.get_active(empire_id)
-            recent_completed = dir_repo.get_completed(empire_id, days=30, limit=5)
+        try:
+            from core.search.sweep import IntelligenceSweep
+            sweep = IntelligenceSweep(empire_id)
+            data["recent_discoveries"] = sweep.get_recent_discoveries(limit=5)
+        except Exception:
+            data["recent_discoveries"] = []
 
-            # Budget
-            from core.routing.budget import BudgetManager
-            bm = BudgetManager(empire_id)
-            budget = bm.get_budget_report(days=30)
-
-            # Latest research from memory
-            latest_research = []
-            try:
-                from core.memory.manager import MemoryManager
-                mm = MemoryManager(empire_id)
-                research = mm.recall(
-                    query="research synthesis",
-                    memory_types=["semantic"],
-                    limit=5,
-                )
-                latest_research = research
-            except Exception:
-                pass
-
-            # Latest RSS feed entries
-            latest_feeds = []
-            try:
-                from core.search.feeds import FeedReader
-                reader = FeedReader(empire_id)
-                entries = reader.fetch_latest(max_total=5, max_per_feed=2)
-                latest_feeds = [
-                    {"title": e.title, "url": e.url, "summary": e.summary, "source": e.source_feed}
-                    for e in entries
-                ]
-            except Exception:
-                pass
-
-            # Knowledge graph highlights
-            knowledge_highlights = []
-            try:
-                from core.knowledge.graph import KnowledgeGraph
-                graph = KnowledgeGraph(empire_id)
-                central = graph.get_central_entities(limit=9)
-                knowledge_highlights = [
-                    {"name": n.name, "type": n.entity_type, "confidence": n.confidence}
-                    for n in central
-                ]
-            except Exception:
-                pass
-
-            # Recent discoveries from sweeps
-            recent_discoveries = []
-            try:
-                from core.search.sweep import IntelligenceSweep
-                sweep = IntelligenceSweep(empire_id)
-                recent_discoveries = sweep.get_recent_discoveries(limit=5)
-            except Exception:
-                pass
-
-            # Infrastructure stats (cache, circuits)
-            infra_stats = {}
-            try:
-                from llm.cache import get_cache
-                infra_stats["cache"] = get_cache().get_stats()
-            except Exception:
-                infra_stats["cache"] = {"enabled": False}
-
-            try:
-                from utils.circuit_breaker import get_all_circuit_stats
-                infra_stats["circuits"] = get_all_circuit_stats()
-            except Exception:
-                infra_stats["circuits"] = {}
-
-            # Scheduler status — check all workers' daemons via shared stats
-            scheduler_info = {}
-            try:
-                daemon = current_app.config.get("_SCHEDULER_DAEMON")
-                if daemon:
-                    status = daemon.get_status()
-                    scheduler_info = {
-                        "running": status.running,
-                        "total_ticks": status.total_ticks,
-                        "total_jobs": status.total_job_runs,
-                        "errors": status.errors,
-                    }
-                # If this worker's daemon hasn't ticked yet, check DB for scheduler evidence
-                if not scheduler_info.get("total_ticks"):
-                    try:
-                        from datetime import datetime, timezone, timedelta
-                        from db.models import WarRoom, Task
-                        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-                        tick_check = session.execute(select(func.count(WarRoom.id)).where(
-                            WarRoom.created_at > one_hour_ago
-                        )).scalar() or 0
-                        task_check = session.execute(select(func.count(Task.id)).where(
-                            Task.created_at > one_hour_ago
-                        )).scalar() or 0
-                        if tick_check or task_check:
-                            scheduler_info["running"] = True
-                            scheduler_info["note"] = "Activity detected (stats from another worker)"
-                            scheduler_info["recent_war_rooms"] = tick_check
-                            scheduler_info["recent_tasks"] = task_check
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # Fleet stats for performance bars
-            fleet_stats = []
-            try:
-                from db.repositories.lieutenant import LieutenantRepository
-                lt_repo = LieutenantRepository(session)
-                lts = lt_repo.get_by_empire(empire_id, status="active")
-                real_costs = lt_repo.get_real_costs_bulk([lt.id for lt in lts])
-                fleet_stats = [
-                    {
-                        "name": lt.name,
-                        "domain": lt.domain,
-                        "performance": lt.performance_score,
-                        "tasks": lt.tasks_completed + lt.tasks_failed,
-                        "cost": real_costs.get(lt.id, 0.0),
-                    }
-                    for lt in sorted(lts, key=lambda x: x.performance_score, reverse=True)
-                ]
-            except Exception:
-                pass
-
-            context = {
-                "health": health,
-                "scheduler": scheduler_info,
-                "recent_discoveries": recent_discoveries,
-                "fleet_stats": fleet_stats,
-                "active_directives": [
-                    {"id": d.id, "title": d.title, "status": d.status, "priority": d.priority}
-                    for d in active_directives
-                ],
-                "recent_completed": [
-                    {"id": d.id, "title": d.title, "quality": d.quality_score, "cost": d.total_cost_usd}
-                    for d in recent_completed
-                ],
-                "budget": {
-                    "daily_spend": budget.daily_spend,
-                    "monthly_spend": budget.monthly_spend,
-                    "daily_remaining": budget.daily_remaining,
-                    "monthly_remaining": budget.monthly_remaining,
-                    "alerts": [{"message": a.message, "severity": a.severity} for a in budget.alerts],
-                },
-                "latest_research": latest_research,
-                "latest_feeds": latest_feeds,
-                "knowledge_highlights": knowledge_highlights,
-                "infra": infra_stats,
-            }
-
-            return render_template("dashboard.html", **context)
-        finally:
-            session.close()
+        return render_template("dashboard.html", **data)
 
     except Exception as e:
         logger.error("Dashboard error: %s", e)
@@ -194,153 +188,8 @@ def index():
 def dashboard_stats():
     """Full dashboard stats as JSON for live refresh."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
-
     try:
-        from db.engine import get_session
-        from db.repositories.empire import EmpireRepository
-        from db.repositories.directive import DirectiveRepository
-
-        session = get_session()
-        try:
-            # Empire overview
-            empire_repo = EmpireRepository(session)
-            health = empire_repo.get_health_overview(empire_id)
-
-            # Directives
-            dir_repo = DirectiveRepository(session)
-            active_directives = [
-                {"id": d.id, "title": d.title, "status": d.status, "priority": d.priority}
-                for d in dir_repo.get_active(empire_id)
-            ]
-            recent_completed = [
-                {"id": d.id, "title": d.title, "quality": d.quality_score, "cost": d.total_cost_usd}
-                for d in dir_repo.get_completed(empire_id, days=30, limit=5)
-            ]
-
-            # Budget
-            budget_data = {}
-            try:
-                from core.routing.budget import BudgetManager
-                bm = BudgetManager(empire_id)
-                budget = bm.get_budget_report(days=30)
-                budget_data = {
-                    "daily_spend": budget.daily_spend,
-                    "monthly_spend": budget.monthly_spend,
-                    "daily_remaining": budget.daily_remaining,
-                    "monthly_remaining": budget.monthly_remaining,
-                    "alerts": [{"message": a.message, "severity": a.severity} for a in budget.alerts],
-                }
-            except Exception:
-                pass
-
-            # Fleet stats
-            fleet_stats = []
-            try:
-                from db.repositories.lieutenant import LieutenantRepository
-                lt_repo = LieutenantRepository(session)
-                lts = lt_repo.get_by_empire(empire_id, status="active")
-                real_costs = lt_repo.get_real_costs_bulk([lt.id for lt in lts])
-                fleet_stats = [
-                    {
-                        "name": lt.name,
-                        "domain": lt.domain,
-                        "performance": lt.performance_score,
-                        "tasks": lt.tasks_completed + lt.tasks_failed,
-                        "cost": real_costs.get(lt.id, 0.0),
-                    }
-                    for lt in sorted(lts, key=lambda x: x.performance_score, reverse=True)
-                ]
-            except Exception:
-                pass
-
-            # Latest research from memory
-            latest_research = []
-            try:
-                from core.memory.manager import MemoryManager
-                mm = MemoryManager(empire_id)
-                research = mm.recall(query="research synthesis", memory_types=["semantic"], limit=5)
-                latest_research = [
-                    {
-                        "title": getattr(r, "title", "") or (getattr(r, "content", "") or "")[:55],
-                        "content": getattr(r, "content", "") or "",
-                        "created_at": (
-                            getattr(r, "created_at", None).isoformat()
-                            if getattr(r, "created_at", None) is not None
-                            else ""
-                        ),
-                    }
-                    for r in research
-                ]
-            except Exception:
-                pass
-
-            # Knowledge highlights
-            knowledge_highlights = []
-            try:
-                from core.knowledge.graph import KnowledgeGraph
-                graph = KnowledgeGraph(empire_id)
-                central = graph.get_central_entities(limit=9)
-                knowledge_highlights = [
-                    {"name": n.name, "type": n.entity_type, "confidence": n.confidence}
-                    for n in central
-                ]
-            except Exception:
-                pass
-
-            # Scheduler
-            scheduler_info = {}
-            try:
-                daemon = current_app.config.get("_SCHEDULER_DAEMON")
-                if daemon:
-                    status = daemon.get_status()
-                    scheduler_info = {
-                        "running": status.running,
-                        "total_ticks": status.total_ticks,
-                        "total_jobs": status.total_job_runs,
-                        "errors": status.errors,
-                    }
-                if not scheduler_info.get("total_ticks"):
-                    try:
-                        from datetime import datetime, timezone, timedelta
-                        from db.models import Task
-                        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-                        task_check = session.execute(select(func.count(Task.id)).where(
-                            Task.created_at > one_hour_ago
-                        )).scalar() or 0
-                        if task_check:
-                            scheduler_info["running"] = True
-                            scheduler_info["recent_tasks"] = task_check
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # Infrastructure
-            infra_stats = {}
-            try:
-                from llm.cache import get_cache
-                infra_stats["cache"] = get_cache().get_stats()
-            except Exception:
-                infra_stats["cache"] = {"enabled": False}
-            try:
-                from utils.circuit_breaker import get_all_circuit_stats
-                infra_stats["circuits"] = get_all_circuit_stats()
-            except Exception:
-                infra_stats["circuits"] = {}
-
-            return jsonify({
-                "health": health,
-                "scheduler": scheduler_info,
-                "fleet_stats": fleet_stats,
-                "active_directives": active_directives,
-                "recent_completed": recent_completed,
-                "budget": budget_data,
-                "latest_research": latest_research,
-                "knowledge_highlights": knowledge_highlights,
-                "infra": infra_stats,
-            })
-        finally:
-            session.close()
-
+        return jsonify(_fetch_dashboard_data(empire_id))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error("API error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500

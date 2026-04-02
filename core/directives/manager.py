@@ -60,20 +60,6 @@ class DirectiveManager:
 
     def __init__(self, empire_id: str = ""):
         self.empire_id = empire_id
-        self._repo = None
-
-    def _get_repo(self):
-        """Get a fresh repository with its own session."""
-        from db.engine import get_session
-        from db.repositories.directive import DirectiveRepository
-        return DirectiveRepository(get_session())
-
-    def _close_repo(self, repo) -> None:
-        """Close the session owned by a repository."""
-        try:
-            repo.session.close()
-        except Exception:
-            pass
 
     def create_directive(
         self,
@@ -95,8 +81,9 @@ class DirectiveManager:
         Returns:
             Created directive info.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             directive = repo.create(
                 empire_id=self.empire_id,
                 title=title,
@@ -114,21 +101,18 @@ class DirectiveManager:
                 "status": "pending",
                 "priority": priority,
             }
-        finally:
-            self._close_repo(repo)
 
     def start_directive(self, directive_id: str) -> dict:
         """Start executing a directive."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             directive = repo.start_directive(directive_id)
             repo.commit()
 
             if directive:
                 return {"id": directive_id, "status": "planning", "started": True}
             return {"id": directive_id, "started": False, "error": "Directive not found"}
-        finally:
-            self._close_repo(repo)
 
     def execute_directive(self, directive_id: str) -> dict:
         """Execute a directive through the full pipeline.
@@ -145,8 +129,9 @@ class DirectiveManager:
         Returns:
             Execution results.
         """
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             db_directive = repo.get(directive_id)
             if not db_directive:
                 return {"error": "Directive not found"}
@@ -154,8 +139,6 @@ class DirectiveManager:
             start_time = time.time()
             repo.start_directive(directive_id)
             repo.commit()
-        finally:
-            self._close_repo(repo)
 
         logger.info("Executing directive: %s", db_directive.title)
 
@@ -184,12 +167,9 @@ class DirectiveManager:
         plan_result = session.run_planning_phase(db_directive.title, db_directive.description)
 
         # 2. Wave execution
-        repo = self._get_repo()
-        try:
+        with repo_scope(DirectiveRepository) as repo:
             repo.update(directive_id, status="executing", pipeline_stage="executing")
             repo.commit()
-        finally:
-            self._close_repo(repo)
 
         unified_plan = plan_result.get("unified_plan", {})
 
@@ -213,12 +193,9 @@ class DirectiveManager:
         for wave in waves:
             wave_num = wave.get("wave_number", 1)
             tasks = wave.get("tasks", [])
-            repo = self._get_repo()
-            try:
+            with repo_scope(DirectiveRepository) as repo:
                 repo.update(directive_id, current_wave=wave_num)
                 repo.commit()
-            finally:
-                self._close_repo(repo)
 
             wave_task_results = []
             task_records = []
@@ -228,11 +205,9 @@ class DirectiveManager:
             task_assignments = []
 
             # Fetch active lieutenants ONCE instead of per-task DB query
-            repo_lt = lt_manager._get_repo()
-            try:
+            from db.repositories.lieutenant import LieutenantRepository
+            with repo_scope(LieutenantRepository) as repo_lt:
                 active_lts = repo_lt.get_by_empire(lt_manager.empire_id, status="active")
-            finally:
-                lt_manager._close_repo(repo_lt)
 
             for task_data in tasks:
                 desc_lower = task_data.get("description", "").lower()
@@ -360,8 +335,7 @@ class DirectiveManager:
                 logger.warning("War Room close failed: %s", e)
 
         # 4. Complete
-        repo = self._get_repo()
-        try:
+        with repo_scope(DirectiveRepository) as repo:
             repo.update(
                 directive_id,
                 status="completed",
@@ -370,12 +344,9 @@ class DirectiveManager:
                 total_cost_usd=total_cost,
             )
             repo.commit()
-        finally:
-            self._close_repo(repo)
 
         duration = time.time() - start_time
         logger.info("Directive completed: %s (cost=$%.4f, duration=%.1fs)", db_directive.title, total_cost, duration)
-
         return {
             "directive_id": directive_id,
             "status": "completed",
@@ -387,8 +358,9 @@ class DirectiveManager:
 
     def get_directive(self, directive_id: str) -> dict | None:
         """Get directive details."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             d = repo.get(directive_id)
             if not d:
                 return None
@@ -398,13 +370,12 @@ class DirectiveManager:
                 "current_wave": d.current_wave, "total_cost": d.total_cost_usd,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
-        finally:
-            self._close_repo(repo)
 
     def list_directives(self, status: str | None = None, limit: int = 50) -> list[dict]:
         """List directives with optional status filter."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             directives = repo.get_by_empire(self.empire_id, status=status, limit=limit)
             return [
                 {
@@ -415,13 +386,12 @@ class DirectiveManager:
                 }
                 for d in directives
             ]
-        finally:
-            self._close_repo(repo)
 
     def get_progress(self, directive_id: str) -> DirectiveProgress:
         """Get directive execution progress."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             progress = repo.get_progress(directive_id)
             return DirectiveProgress(
                 directive_id=directive_id,
@@ -432,38 +402,33 @@ class DirectiveManager:
                 pending=progress.get("pending", 0),
                 completion_percent=progress.get("completion_percent", 0),
             )
-        finally:
-            self._close_repo(repo)
 
     def get_cost_summary(self, directive_id: str) -> CostSummary:
         """Get cost summary for a directive."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             raw = repo.get_cost_summary(directive_id)
             return CostSummary(
                 total_cost=raw.get("total_cost_usd", 0),
                 by_model=raw.get("by_model", {}),
             )
-        finally:
-            self._close_repo(repo)
 
     def cancel_directive(self, directive_id: str) -> bool:
         """Cancel a directive."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             result = repo.update(directive_id, status="cancelled", completed_at=datetime.now(timezone.utc))
             repo.commit()
             return result is not None
-        finally:
-            self._close_repo(repo)
 
     def get_stats(self, days: int = 30) -> dict:
         """Get directive statistics."""
-        repo = self._get_repo()
-        try:
+        from db.engine import repo_scope
+        from db.repositories.directive import DirectiveRepository
+        with repo_scope(DirectiveRepository) as repo:
             return repo.get_stats(self.empire_id, days)
-        finally:
-            self._close_repo(repo)
 
     def _llm_task_breakdown(self, title: str, description: str) -> list[dict]:
         """Use LLM to generate a proper task breakdown when War Room produces no waves."""
