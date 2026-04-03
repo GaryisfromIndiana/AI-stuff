@@ -615,6 +615,123 @@ class KnowledgeGraph:
             repo.commit()
             return count
 
+    def get_context_window(
+        self,
+        query: str,
+        token_budget: int = 2000,
+        include_relations: bool = True,
+        include_facts: bool = True,
+        min_confidence: float = 0.4,
+    ) -> str:
+        """Build a formatted knowledge context string for agent prompts.
+
+        Queries entities, their relations, and verified facts relevant to
+        the query.  Fits everything within the token budget (approx 4 chars
+        per token).  Returns a markdown-formatted string ready for injection
+        into a system prompt.
+        """
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+
+        char_budget = token_budget * 4  # rough chars-per-token estimate
+        sections: list[str] = []
+        used = 0
+
+        with repo_scope(KnowledgeRepository) as repo:
+            # ── 1. Find matching entities ─────────────────────────────
+            entities = repo.search_entities(query, self.empire_id, limit=8)
+            if not entities:
+                return ""
+
+            # Deduplicate and sort by importance
+            seen_ids: set[str] = set()
+            unique: list = []
+            for e in entities:
+                if e.id not in seen_ids and e.confidence >= min_confidence:
+                    seen_ids.add(e.id)
+                    unique.append(e)
+            unique.sort(key=lambda e: e.importance_score, reverse=True)
+
+            # ── 2. Format entities ────────────────────────────────────
+            entity_lines: list[str] = []
+            for e in unique[:6]:
+                desc = (e.description or "")[:200]
+                line = f"- **{e.name}** ({e.entity_type}): {desc}"
+                if used + len(line) > char_budget:
+                    break
+                entity_lines.append(line)
+                used += len(line) + 1
+
+                # Bump access count so ACT-R activation stays current
+                try:
+                    repo.update(e.id, access_count=e.access_count + 1)
+                except Exception:
+                    pass
+
+            if entity_lines:
+                header = "## Known Entities"
+                sections.append(header + "\n" + "\n".join(entity_lines))
+
+            # ── 3. Relations between matched entities ─────────────────
+            if include_relations and len(unique) >= 2:
+                rel_lines: list[str] = []
+                entity_ids = {e.id for e in unique[:6]}
+
+                for e in unique[:6]:
+                    relations = repo.get_relations(e.id, direction="outgoing")
+                    for rel in relations:
+                        if rel.target_entity_id in entity_ids and rel.confidence >= min_confidence:
+                            # Resolve target name
+                            target = next(
+                                (t for t in unique if t.id == rel.target_entity_id), None
+                            )
+                            if target:
+                                line = f"- {e.name} → {rel.relation_type} → {target.name}"
+                                if used + len(line) > char_budget:
+                                    break
+                                rel_lines.append(line)
+                                used += len(line) + 1
+
+                if rel_lines:
+                    sections.append("## Entity Relations\n" + "\n".join(rel_lines))
+
+            # ── 4. Verified facts ─────────────────────────────────────
+            if include_facts:
+                from db.repositories.facts import FactsRepository
+                from db.engine import repo_scope as _rs
+
+                try:
+                    with _rs(FactsRepository) as facts_repo:
+                        fact_lines: list[str] = []
+                        for e in unique[:4]:
+                            facts = facts_repo.get_entity_facts(
+                                e.id, self.empire_id, verified_only=False, limit=5,
+                            )
+                            for f in facts:
+                                if f.confidence < min_confidence:
+                                    continue
+                                status_icon = {
+                                    "supported": "[verified]",
+                                    "contradicted": "[disputed]",
+                                }.get(f.verification_status, "")
+                                line = f"- {f.claim} {status_icon}"
+                                if used + len(line) > char_budget:
+                                    break
+                                fact_lines.append(line)
+                                used += len(line) + 1
+
+                        if fact_lines:
+                            sections.append("## Known Facts\n" + "\n".join(fact_lines))
+                except Exception as e:
+                    logger.debug("Facts lookup failed in context window: %s", e)
+
+        repo.commit()  # persist access_count bumps
+
+        if not sections:
+            return ""
+
+        return "\n\n".join(sections)
+
     def get_stats(self) -> GraphStats:
         """Get knowledge graph statistics."""
         from db.engine import repo_scope

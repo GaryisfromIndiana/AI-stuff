@@ -386,20 +386,19 @@ class Lieutenant:
         except Exception as e:
             logger.debug("[%s] Memory context build failed: %s", self.name, e)
 
-        # Get relevant knowledge graph entities (lightweight — no neighbor traversal)
+        # Get relevant knowledge graph context (entities + relations + facts)
         knowledge_context = ""
         try:
             from core.knowledge.graph import KnowledgeGraph
             graph = KnowledgeGraph(self.empire_id)
-            entities = graph.find_entities(query=task_query[:100], limit=5)
-            if entities:
-                kg_parts = [
-                    f"- {e.name} ({e.entity_type}): {e.description[:150]}"
-                    for e in entities
-                ]
-                knowledge_context = "## Known Entities\n" + "\n".join(kg_parts)
-        except Exception:
-            pass
+            knowledge_context = graph.get_context_window(
+                query=task_query[:200],
+                token_budget=2000,
+                include_relations=True,
+                include_facts=True,
+            )
+        except Exception as e:
+            logger.debug("[%s] KG context build failed: %s", self.name, e)
 
         # Build the full context
         context_parts = [self.persona.build_system_prompt()]
