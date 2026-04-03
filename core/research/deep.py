@@ -1,7 +1,13 @@
-"""Deep research orchestration — pipeline + lieutenant perspectives + synthesis.
+"""Deep research orchestration — the core compounding loop.
 
-Extracted from god_panel.py so it can be called from any coordination layer
-(God Panel, scheduler, API, CLI) without importing web routes.
+Flow:
+1. Check prior knowledge (what does Empire already know?)
+2. Research pipeline (search → scrape → synthesize)
+3. Final synthesis (merge new findings with prior knowledge)
+4. Store in bi-temporal memory (with supersession)
+5. Extract entities → store in knowledge graph (MANDATORY)
+
+Every research cycle should leave the system smarter than before.
 """
 
 from __future__ import annotations
@@ -30,17 +36,30 @@ def execute_deep_research(
     build_on_existing: bool,
     priority: int,
 ) -> dict:
-    """Execute deep research with lieutenant perspectives.
+    """Execute deep research with compounding knowledge.
 
-    Flow:
-    1. Run research pipeline (search -> scrape -> extract -> synthesize)
-    2. Get lieutenant perspectives on the findings
-    3. Synthesize everything into a final brief
-    4. Store compounded knowledge
+    This is the central research function. Every call should:
+    - Check what Empire already knows (prior knowledge)
+    - Research new information (web search + scrape)
+    - Synthesize everything into a brief
+    - Store the synthesis as a bi-temporal fact
+    - Extract entities and store them in the knowledge graph
+
+    The knowledge graph and memory get richer with every cycle.
     """
     result = {"status": "completed", "research_cost": 0.0}
 
-    # 1. Research pipeline
+    # ── 1. Check prior knowledge ──────────────────────────────────
+    # What does Empire already know about this topic?
+    # This makes research BUILD ON existing knowledge instead of starting fresh.
+    if not prior_knowledge:
+        prior_knowledge = _gather_prior_knowledge(empire_id, topic)
+        if prior_knowledge:
+            build_on_existing = True
+            result["prior_knowledge_found"] = True
+            logger.info("Found prior knowledge on '%s' — building on it", topic[:50])
+
+    # ── 2. Research pipeline ──────────────────────────────────────
     try:
         from core.research.pipeline import ResearchPipeline
         pipeline = ResearchPipeline(empire_id)
@@ -56,7 +75,7 @@ def execute_deep_research(
         result["research_cost"] += pipe_result.cost_usd
         raw_synthesis = pipe_result.synthesis or ""
     except Exception as e:
-        logger.warning("Pipeline failed in deep research: %s", e)
+        logger.warning("Pipeline failed, falling back to basic search: %s", e)
         from core.search.web import WebSearcher
         searcher = WebSearcher(empire_id)
         search_result = searcher.research_topic(topic, depth="deep")
@@ -68,115 +87,184 @@ def execute_deep_research(
         result["synthesis"] = "Research produced no synthesis."
         return result
 
-    # 2. Lieutenant perspectives
-    lieutenant_insights = []
-    if lieutenant_domains:
-        try:
-            from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
+    # ── 3. Final synthesis (merge new + prior) ────────────────────
+    from llm.router import ModelRouter, TaskMetadata
+    from llm.base import LLMRequest, LLMMessage
 
-            router = ModelRouter(empire_id)
+    router = ModelRouter(empire_id)
 
-            for domain in lieutenant_domains[:3]:
-                lt_name, lt_focus = DOMAIN_ROLES.get(domain, (domain.title(), domain))
+    synthesis_parts = [f"## New Research Findings\n{raw_synthesis[:4000]}"]
+    if prior_knowledge and build_on_existing:
+        synthesis_parts.append(f"\n## What Empire Already Knew\n{prior_knowledge[:1500]}")
 
-                lt_prompt = (
-                    f"You are {lt_name}, Empire's specialist in {lt_focus}.\n\n"
-                    f"Research findings on '{topic}':\n{raw_synthesis[:3000]}\n\n"
-                    f"From your domain perspective ({domain}), provide:\n"
-                    f"1. What stands out as most significant?\n"
-                    f"2. What's missing or needs deeper investigation?\n"
-                    f"3. How does this connect to your domain?\n\n"
-                    f"Be concise (3-5 sentences max)."
-                )
+    combined = "\n".join(synthesis_parts)
 
-                try:
-                    lt_response = router.execute(
-                        LLMRequest(messages=[LLMMessage.user(lt_prompt)], max_tokens=300, temperature=0.3),
-                        TaskMetadata(task_type="analysis", complexity="moderate"),
-                    )
-                    lieutenant_insights.append({
-                        "lieutenant": lt_name,
-                        "domain": domain,
-                        "perspective": lt_response.content,
-                    })
-                    result["research_cost"] += lt_response.cost_usd
-                except Exception as e:
-                    logger.debug("Lieutenant %s perspective failed: %s", domain, e)
-
-        except Exception as e:
-            logger.debug("Lieutenant perspectives failed: %s", e)
-
-    result["lieutenant_perspectives"] = lieutenant_insights
-
-    # 3. Final synthesis with all inputs
     try:
-        from llm.router import ModelRouter, TaskMetadata
-        from llm.base import LLMRequest, LLMMessage
-
-        router = ModelRouter(empire_id)
-
-        synthesis_parts = [f"## Research Findings\n{raw_synthesis[:4000]}"]
-
-        if prior_knowledge and build_on_existing:
-            synthesis_parts.append(f"\n## Empire's Prior Knowledge\n{prior_knowledge[:1500]}")
-
-        if lieutenant_insights:
-            lt_section = "\n## Lieutenant Perspectives\n"
-            for lt in lieutenant_insights:
-                lt_section += f"\n**{lt['lieutenant']}** ({lt['domain']}):\n{lt['perspective']}\n"
-            synthesis_parts.append(lt_section)
-
-        combined = "\n".join(synthesis_parts)
-
         final_prompt = (
-            f"You are Empire's Chief of Staff. Synthesize all inputs about '{topic}' "
-            f"into a final intelligence brief.\n\n"
+            f"Synthesize all inputs about '{topic}' into an intelligence brief.\n\n"
             f"Structure:\n"
             f"1. **Executive Summary** (2-3 sentences)\n"
-            f"2. **Key Findings** (bullet points)\n"
-            f"3. **Lieutenant Insights** (what the specialists flagged)\n"
-            f"4. **Knowledge Gaps** (what to investigate next)\n"
-            f"5. **Strategic Implications** (what this means for AI)\n\n"
+            f"2. **Key Findings** (bullet points — cite sources)\n"
+            f"3. **What's New** (what changed vs prior knowledge, if any)\n"
+            f"4. **Knowledge Gaps** (what to investigate next)\n\n"
             f"Inputs:\n{combined[:8000]}"
         )
 
         final_response = router.execute(
-            LLMRequest(messages=[LLMMessage.user(final_prompt)], max_tokens=1500, temperature=0.3),
+            LLMRequest(
+                messages=[LLMMessage.user(final_prompt)],
+                system_prompt="You are a research analyst. Be specific, cite sources, distinguish new from known.",
+                max_tokens=1500, temperature=0.3,
+            ),
             TaskMetadata(task_type="synthesis", complexity="complex"),
         )
-
         result["synthesis"] = final_response.content
         result["research_cost"] += final_response.cost_usd
-
-        # 4. Store the compounded knowledge
-        try:
-            from core.memory.bitemporal import BiTemporalMemory
-            BiTemporalMemory(empire_id).store_smart(
-                content=f"God Panel Research: {topic}\n\n{final_response.content}",
-                title=f"Research: {topic[:60]}",
-                category="god_panel_research",
-                importance=0.85,
-                tags=["god_panel", "research", "synthesis"],
-            )
-        except Exception as e:
-            logger.debug("Failed to store research memory: %s", e)
 
     except Exception as e:
         logger.warning("Final synthesis failed: %s", e)
         result["synthesis"] = raw_synthesis[:2000]
 
+    # ── 4. Store in bi-temporal memory ────────────────────────────
+    synthesis_text = result.get("synthesis", "")
+    try:
+        from core.memory.bitemporal import BiTemporalMemory
+        BiTemporalMemory(empire_id).store_smart(
+            content=f"Research: {topic}\n\n{synthesis_text}",
+            title=f"Research: {topic[:60]}",
+            category="research",
+            importance=0.85,
+            source="research_pipeline",
+            tags=["research", "synthesis"] + [d for d in lieutenant_domains[:3]],
+        )
+    except Exception as e:
+        logger.debug("Failed to store research memory: %s", e)
+
+    # ── 5. Extract entities → Knowledge Graph (MANDATORY) ─────────
+    # This is what makes knowledge compound. Every synthesis should
+    # produce entities that land in the KG for future research to build on.
+    extraction_result = _extract_and_store_entities(empire_id, synthesis_text, topic, router)
+    result["entities_extracted"] = extraction_result.get("extracted", 0)
+    result["entities_stored"] = extraction_result.get("stored", 0)
+    result["relations_stored"] = extraction_result.get("relations", 0)
+    result["research_cost"] += extraction_result.get("cost_usd", 0)
+
     return result
 
 
-def execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
-    """Empire finds its own knowledge gaps and researches to fill them.
+def _gather_prior_knowledge(empire_id: str, topic: str) -> str:
+    """Check what Empire already knows about a topic.
 
-    Flow:
-    1. Scan KG for domains with least coverage
-    2. Generate research topics for the weakest areas
-    3. Run deep research on each topic
+    Queries both memory and knowledge graph. Returns a formatted string
+    for injection into the research prompt.
     """
+    parts = []
+
+    # Check memories
+    try:
+        from core.memory.manager import MemoryManager
+        mm = MemoryManager(empire_id)
+        memories = mm.recall(query=topic, memory_types=["semantic"], limit=5)
+        if memories:
+            mem_parts = []
+            for m in memories:
+                title = m.get("title", "")
+                content = m.get("content", "")[:200]
+                if content:
+                    mem_parts.append(f"- {title}: {content}" if title else f"- {content}")
+            if mem_parts:
+                parts.append("Known facts:\n" + "\n".join(mem_parts[:5]))
+    except Exception as e:
+        logger.debug("Prior memory lookup failed: %s", e)
+
+    # Check knowledge graph
+    try:
+        from core.knowledge.graph import KnowledgeGraph
+        graph = KnowledgeGraph(empire_id)
+        entities = graph.find_entities(query=topic, limit=5)
+        if entities:
+            ent_parts = [
+                f"- {e.name} ({e.entity_type}): {e.description[:100]}"
+                for e in entities if e.description
+            ]
+            if ent_parts:
+                parts.append("Known entities:\n" + "\n".join(ent_parts[:5]))
+    except Exception as e:
+        logger.debug("Prior KG lookup failed: %s", e)
+
+    return "\n\n".join(parts)
+
+
+def _extract_and_store_entities(
+    empire_id: str,
+    synthesis: str,
+    topic: str,
+    router,
+) -> dict:
+    """Extract entities from synthesis and store them in the knowledge graph.
+
+    This is MANDATORY — it's what makes the KG grow and knowledge compound.
+    """
+    if not synthesis or len(synthesis) < 50:
+        return {"extracted": 0, "stored": 0, "relations": 0, "cost_usd": 0}
+
+    try:
+        from core.knowledge.entities import EntityExtractor
+        from core.knowledge.graph import KnowledgeGraph
+
+        extractor = EntityExtractor(router=router)
+        extraction = extractor.extract_from_text(synthesis[:4000], context=f"Topic: {topic}")
+
+        if not extraction.entities:
+            return {"extracted": 0, "stored": 0, "relations": 0, "cost_usd": extraction.cost_usd}
+
+        graph = KnowledgeGraph(empire_id)
+        stored = 0
+        for e in extraction.entities:
+            try:
+                graph.add_entity(
+                    name=e.get("name", ""),
+                    entity_type=e.get("entity_type", "concept"),
+                    description=e.get("description", ""),
+                    confidence=e.get("confidence", 0.7),
+                )
+                stored += 1
+            except Exception:
+                pass
+
+        rel_stored = 0
+        for r in extraction.relations:
+            try:
+                graph.add_relation(
+                    source_name=r.get("source", ""),
+                    target_name=r.get("target", ""),
+                    relation_type=r.get("type", "related_to"),
+                    confidence=r.get("confidence", 0.7),
+                )
+                rel_stored += 1
+            except Exception:
+                pass
+
+        logger.info(
+            "Extracted %d entities, %d relations from '%s' (stored %d/%d)",
+            len(extraction.entities), len(extraction.relations),
+            topic[:40], stored, len(extraction.entities),
+        )
+
+        return {
+            "extracted": len(extraction.entities),
+            "stored": stored,
+            "relations": rel_stored,
+            "cost_usd": extraction.cost_usd,
+        }
+
+    except Exception as e:
+        logger.warning("Entity extraction failed for '%s': %s", topic[:40], e)
+        return {"extracted": 0, "stored": 0, "relations": 0, "cost_usd": 0}
+
+
+def execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
+    """Empire finds its own knowledge gaps and researches to fill them."""
     from core.knowledge.graph import KnowledgeGraph
     from core.routing.budget import BudgetManager
 
@@ -198,7 +286,7 @@ def execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
         bm = BudgetManager(empire_id)
         check = bm.check_budget(estimated_cost=0.10)
         if check.remaining_daily < 0.50:
-            logger.info("Autoresearch stopping at round %d — budget low ($%.2f remaining)", round_num, check.remaining_daily)
+            logger.info("Autoresearch stopping at round %d — budget low", round_num)
             break
 
         graph = KnowledgeGraph(empire_id)
@@ -223,9 +311,9 @@ def execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
                     f"You are an AI research director. The '{domain}' knowledge domain has {count} entries, "
                     f"which is {'very low' if count < 20 else 'moderate'}.\n\n"
                     f"Domain focus: {DOMAINS[domain]}\n\n"
-                    f"Already researched topics this session: {[t['topic'] for t in topics_researched]}\n\n"
-                    f"Generate ONE specific, timely research topic that would fill the biggest gap. "
-                    f"Focus on developments from early 2025. Do NOT repeat already-researched topics.\n\n"
+                    f"Already researched: {[t['topic'] for t in topics_researched]}\n\n"
+                    f"Generate ONE specific, timely research topic for early 2025. "
+                    f"Do NOT repeat already-researched topics.\n\n"
                     f"Respond with ONLY the topic — one sentence, no explanation."
                 )
 
@@ -239,7 +327,7 @@ def execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
                 if not topic:
                     continue
 
-                logger.info("Autoresearch round %d: %s (domain=%s, entities=%d)", round_num, topic[:60], domain, count)
+                logger.info("Autoresearch round %d: %s (domain=%s)", round_num, topic[:60], domain)
                 research_result = execute_deep_research(
                     empire_id, topic, f"Autonomous gap research for {domain}: {topic}",
                     [domain], "", False, priority,
@@ -251,16 +339,15 @@ def execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
                     "domain": domain,
                     "topic": topic,
                     "entities_before": count,
+                    "entities_extracted": research_result.get("entities_extracted", 0),
                     "success": research_result.get("status") == "completed",
                 })
 
             except Exception as e:
                 logger.warning("Autoresearch failed for %s: %s", domain, e)
                 topics_researched.append({
-                    "round": round_num,
-                    "domain": domain,
-                    "topic": f"Failed: {e}",
-                    "success": False,
+                    "round": round_num, "domain": domain,
+                    "topic": f"Failed: {e}", "success": False,
                 })
 
     return {

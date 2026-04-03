@@ -275,8 +275,15 @@ class ACEEngine:
                     result.cost_usd += execution.get("cost", 0.0)
 
             if not result.success and result.quality_score > 0:
-                # Accept with lower quality if we exhausted iterations
-                result.success = result.quality_score >= (self._min_quality * 0.7)
+                # Accept at reduced threshold only if quality is still meaningful.
+                # At min_quality=0.6, reduced threshold = 0.48 (not great but usable).
+                reduced = self._min_quality * 0.8
+                if result.quality_score >= reduced:
+                    result.success = True
+                    logger.info(
+                        "Task %s accepted at reduced quality %.2f (threshold %.2f, reduced %.2f)",
+                        task.id, result.quality_score, self._min_quality, reduced,
+                    )
 
             result.output = {
                 "content": result.content,
@@ -569,8 +576,10 @@ Respond as JSON:
 
         except Exception as e:
             logger.warning("Critic evaluation failed: %s", e)
-            # If critic fails, give moderate score and approve
-            return {"overall_score": 0.6, "approved": True, "issues": [f"Critic error: {e}"], "cost": 0.0}
+            # Critic failure = unknown quality. Don't approve blindly — return
+            # low score so the retry loop can try again or the accept-with-lower-quality
+            # logic decides based on actual threshold math.
+            return {"overall_score": 0.4, "approved": False, "issues": [f"Critic error: {e}"], "cost": 0.0}
 
     def _format_input_data(self, data: dict) -> str:
         """Format input data for the execution prompt."""
