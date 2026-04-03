@@ -184,6 +184,18 @@ class WarRoomSettings(BaseSettings):
     retrospective_model: str = "claude-sonnet-4"
 
 
+class QdrantSettings(BaseSettings):
+    """Qdrant vector store settings."""
+
+    url: str = ""  # Set EMPIRE_QDRANT__URL to enable
+    api_key: str = ""  # Set EMPIRE_QDRANT__API_KEY for auth
+    collection_prefix: str = "empire"
+    embedding_dimension: int = Field(default=1536, ge=1)
+    hnsw_m: int = Field(default=16, ge=4, le=64)
+    hnsw_ef: int = Field(default=100, ge=50, le=500)
+    on_disk: bool = False
+
+
 class KnowledgeSettings(BaseSettings):
     """Knowledge system settings."""
 
@@ -262,6 +274,7 @@ class Settings(BaseSettings):
     warroom: WarRoomSettings = Field(default_factory=WarRoomSettings)
     knowledge: KnowledgeSettings = Field(default_factory=KnowledgeSettings)
     evolution: EvolutionSettings = Field(default_factory=EvolutionSettings)
+    qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
 
     @field_validator("data_dir", mode="before")
     @classmethod
