@@ -420,8 +420,14 @@ def _dispatch_action(
     elif action == "SWEEP":
         from core.search.sweep import IntelligenceSweep
         sweep = IntelligenceSweep(empire_id)
-        discoveries = sweep.run_sweep()
-        return {"status": "completed", "discoveries": len(discoveries) if isinstance(discoveries, list) else 0}
+        result = sweep.run_full_sweep()
+        return {
+            "status": "completed",
+            "total_found": result.total_found,
+            "novel_items": result.novel_items,
+            "stored_memories": result.stored_memories,
+            "stored_entities": result.stored_entities,
+        }
 
     elif action == "EVOLVE":
         from core.evolution.cycle import EvolutionCycleManager

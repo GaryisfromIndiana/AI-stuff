@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from contextlib import contextmanager
@@ -146,8 +147,11 @@ def get_engine(db_url: str | None = None, echo: bool = False) -> Engine:
             engine = create_engine(
                 db_url,
                 echo=echo,
-                pool_size=15,
-                max_overflow=25,
+                # Single gunicorn worker × 4 gthread threads → 4 concurrent ops.
+                # Previous 15+25=40 conns per worker contributed to memory
+                # pressure on Railway and easily exceeded PG plan limits.
+                pool_size=int(os.environ.get("DB_POOL_SIZE", "5")),
+                max_overflow=int(os.environ.get("DB_MAX_OVERFLOW", "10")),
                 pool_pre_ping=True,
                 pool_recycle=300,
                 pool_timeout=20,

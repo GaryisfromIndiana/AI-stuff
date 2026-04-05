@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from flask import Blueprint, render_template, jsonify, current_app
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +70,34 @@ def _fetch_dashboard_data(empire_id: str) -> dict:
         except Exception as e:
             logger.debug("Dashboard fleet stats failed: %s", e)
 
-        # Latest research from memory
+        # Latest research from memory — cheap DB query, not vector recall.
+        # Dashboard is polled every 30s by the browser; the old mm.recall call
+        # hit _vector_search_fallback which loaded hundreds of embedded rows
+        # per hit. That was the single biggest contributor to OOM kills.
         latest_research = []
         try:
-            from core.memory.manager import MemoryManager
-            mm = MemoryManager(empire_id)
-            latest_research = mm.recall(query="research synthesis", memory_types=["semantic"], limit=5)
+            from db.models import MemoryEntry
+            stmt = (
+                select(MemoryEntry)
+                .where(and_(
+                    MemoryEntry.empire_id == empire_id,
+                    MemoryEntry.memory_type == "semantic",
+                    MemoryEntry.category.in_(["research_pipeline", "synthesis", "research"]),
+                ))
+                .order_by(MemoryEntry.created_at.desc())
+                .limit(5)
+            )
+            rows = session.execute(stmt).scalars().all()
+            latest_research = [
+                {
+                    "id": m.id,
+                    "title": m.title,
+                    "content": (m.content or "")[:500],
+                    "category": m.category,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in rows
+            ]
         except Exception as e:
             logger.debug("Dashboard memory fetch failed: %s", e)
 
