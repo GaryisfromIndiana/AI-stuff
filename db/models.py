@@ -486,6 +486,7 @@ class KnowledgeRelation(Base):
         Index("ix_knowledge_relations_target", "target_entity_id"),
         Index("ix_knowledge_relations_type", "relation_type"),
         Index("ix_knowledge_relations_pair", "source_entity_id", "target_entity_id"),
+        UniqueConstraint("source_entity_id", "target_entity_id", "relation_type", name="uq_relation_triple"),
         CheckConstraint("confidence >= 0.0 AND confidence <= 1.0", name="ck_relation_confidence"),
     )
 

@@ -314,22 +314,28 @@ class KnowledgeGraph:
             enriched_meta["inverse_label"] = inverse
             enriched_meta["forward_label"] = relation_type
 
-            relation = repo.add_relation(
-                source_id=source_id,
-                target_id=target_id,
-                relation_type=relation_type,
-                weight=weight,
-                confidence=confidence,
-                metadata=enriched_meta,
-            )
-            repo.commit()
-            return {
-                "id": relation.id,
-                "source": source_name,
-                "target": target_name,
-                "type": relation_type,
-                "inverse": inverse,
-            }
+            from sqlalchemy.exc import IntegrityError
+            try:
+                relation = repo.add_relation(
+                    source_id=source_id,
+                    target_id=target_id,
+                    relation_type=relation_type,
+                    weight=weight,
+                    confidence=confidence,
+                    metadata=enriched_meta,
+                )
+                repo.commit()
+                return {
+                    "id": relation.id,
+                    "source": source_name,
+                    "target": target_name,
+                    "type": relation_type,
+                    "inverse": inverse,
+                }
+            except IntegrityError:
+                # Relation already exists — not an error, just a duplicate attempt
+                repo.rollback()
+                return None
 
     def find_entities(
         self,
