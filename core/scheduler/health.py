@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class HealthCheckResult:
     """Result of a single health check."""
     check_name: str
-    status: str = "healthy"  # healthy, degraded, unhealthy
+    status: str = "healthy"  # healthy, unhealthy, unknown
     message: str = ""
     details: dict = field(default_factory=dict)
     response_time_ms: float = 0.0
@@ -81,12 +81,12 @@ class HealthChecker:
         statuses = [c.status for c in checks]
         if "unhealthy" in statuses:
             overall = "unhealthy"
-        elif "degraded" in statuses:
-            overall = "degraded"
+        elif "unknown" in statuses:
+            overall = "unhealthy"  # unknown is not OK — treat as unhealthy upstream
         else:
             overall = "healthy"
 
-        warnings = [c.message for c in checks if c.status == "degraded"]
+        warnings = [c.message for c in checks if c.status == "unknown"]
         critical = [c.message for c in checks if c.status == "unhealthy"]
 
         report = HealthReport(
@@ -161,11 +161,12 @@ class HealthChecker:
                     details={"daily_spend": daily, "monthly_spend": monthly},
                 )
             elif daily_pct >= 80 or monthly_pct >= 80:
+                logger.warning("Budget nearing limit: daily %.0f%%, monthly %.0f%%", daily_pct, monthly_pct)
                 return HealthCheckResult(
                     check_name="budget",
-                    status="degraded",
+                    status="healthy",
                     message=f"Budget warning: daily {daily_pct:.0f}%, monthly {monthly_pct:.0f}%",
-                    details={"daily_spend": daily, "monthly_spend": monthly},
+                    details={"daily_spend": daily, "monthly_spend": monthly, "warning": True},
                 )
             return HealthCheckResult(
                 check_name="budget",
@@ -175,10 +176,11 @@ class HealthChecker:
             )
 
         except Exception as e:
+            logger.error("Budget health check failed: %s", e)
             return HealthCheckResult(
                 check_name="budget",
-                status="degraded",
-                message=f"Could not check budget: {e}",
+                status="unhealthy",
+                message=f"Budget check failed — cannot verify spend: {e}",
             )
 
     def check_lieutenant_health(self) -> HealthCheckResult:
@@ -197,7 +199,7 @@ class HealthChecker:
             if total == 0:
                 return HealthCheckResult(
                     check_name="lieutenants",
-                    status="degraded",
+                    status="unhealthy",
                     message="No lieutenants registered",
                 )
 
@@ -210,11 +212,12 @@ class HealthChecker:
                 )
 
             if avg_perf < 0.3:
+                logger.warning("Low fleet performance: %.2f", avg_perf)
                 return HealthCheckResult(
                     check_name="lieutenants",
-                    status="degraded",
+                    status="healthy",
                     message=f"Low fleet performance: {avg_perf:.2f}",
-                    details={"total": total, "active": active, "avg_performance": avg_perf},
+                    details={"total": total, "active": active, "avg_performance": avg_perf, "warning": True},
                 )
 
             return HealthCheckResult(
@@ -225,7 +228,8 @@ class HealthChecker:
             )
 
         except Exception as e:
-            return HealthCheckResult(check_name="lieutenants", status="degraded", message=f"Check failed: {e}")
+            logger.error("Lieutenant health check failed: %s", e)
+            return HealthCheckResult(check_name="lieutenants", status="unhealthy", message=f"Check failed: {e}")
 
     def check_memory_usage(self) -> HealthCheckResult:
         """Check memory system health."""
@@ -245,11 +249,12 @@ class HealthChecker:
                 )
 
             if avg_decay < 0.2:
+                logger.warning("High memory decay (%.2f), maintenance needed", avg_decay)
                 return HealthCheckResult(
                     check_name="memory",
-                    status="degraded",
+                    status="healthy",
                     message=f"High memory decay ({avg_decay:.2f}), maintenance needed",
-                    details={"total": total, "avg_decay": avg_decay},
+                    details={"total": total, "avg_decay": avg_decay, "warning": True},
                 )
 
             return HealthCheckResult(
@@ -260,7 +265,8 @@ class HealthChecker:
             )
 
         except Exception as e:
-            return HealthCheckResult(check_name="memory", status="degraded", message=f"Check failed: {e}")
+            logger.error("Memory health check failed: %s", e)
+            return HealthCheckResult(check_name="memory", status="unhealthy", message=f"Check failed: {e}")
 
     def check_knowledge_graph(self) -> HealthCheckResult:
         """Check knowledge graph health."""
@@ -281,7 +287,8 @@ class HealthChecker:
             )
 
         except Exception as e:
-            return HealthCheckResult(check_name="knowledge_graph", status="degraded", message=f"Check failed: {e}")
+            logger.error("Knowledge graph health check failed: %s", e)
+            return HealthCheckResult(check_name="knowledge_graph", status="unhealthy", message=f"Check failed: {e}")
 
     def check_disk_space(self) -> HealthCheckResult:
         """Check available disk space."""
@@ -299,11 +306,12 @@ class HealthChecker:
                     details={"free_gb": free_gb, "used_percent": used_pct},
                 )
             elif free_gb < 5.0:
+                logger.warning("Low disk space: %.1fGB free", free_gb)
                 return HealthCheckResult(
                     check_name="disk_space",
-                    status="degraded",
+                    status="healthy",
                     message=f"Disk space warning: {free_gb:.1f}GB free",
-                    details={"free_gb": free_gb, "used_percent": used_pct},
+                    details={"free_gb": free_gb, "used_percent": used_pct, "warning": True},
                 )
             return HealthCheckResult(
                 check_name="disk_space",
@@ -313,7 +321,8 @@ class HealthChecker:
             )
 
         except Exception as e:
-            return HealthCheckResult(check_name="disk_space", status="degraded", message=f"Check failed: {e}")
+            logger.error("Disk space health check failed: %s", e)
+            return HealthCheckResult(check_name="disk_space", status="unhealthy", message=f"Check failed: {e}")
 
     def get_system_dashboard(self) -> SystemDashboard:
         """Get comprehensive system dashboard data."""
@@ -335,10 +344,10 @@ class HealthChecker:
             if not cache.enabled:
                 return HealthCheckResult(
                     check_name="redis",
-                    status="degraded",
+                    status="healthy",
                     message="Redis disabled — LLM cache inactive",
                     response_time_ms=response_time,
-                    details=cache.get_stats(),
+                    details={**cache.get_stats(), "warning": True},
                 )
 
             stats = cache.get_stats()
@@ -350,9 +359,10 @@ class HealthChecker:
                 details=stats,
             )
         except Exception as e:
+            logger.error("Redis health check failed: %s", e)
             return HealthCheckResult(
                 check_name="redis",
-                status="degraded",
+                status="unhealthy",
                 message=f"Redis check failed: {e}",
                 response_time_ms=(time.time() - start) * 1000,
             )
@@ -391,9 +401,10 @@ class HealthChecker:
                 details=stats,
             )
         except Exception as e:
+            logger.error("Circuit breaker health check failed: %s", e)
             return HealthCheckResult(
                 check_name="circuit_breakers",
-                status="degraded",
+                status="unhealthy",
                 message=f"Circuit breaker check failed: {e}",
             )
 

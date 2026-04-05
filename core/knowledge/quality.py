@@ -185,8 +185,8 @@ class EntityQualityScorer:
                 enriched["quality_score"] = qs.to_dict()
                 repo.update(entity_id, attributes_json=enriched)
                 repo.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Failed to persist quality score for %s: %s", entity_id, e)
 
             return qs
 

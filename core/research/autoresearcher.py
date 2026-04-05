@@ -258,7 +258,12 @@ class AutoResearcher:
     # ------------------------------------------------------------------
 
     def _execute_research(self, question: Any) -> ResearchStepResult:
-        """Execute a multi-step research pipeline for one question."""
+        """Execute a multi-step research pipeline for one question.
+
+        Creates a Task row linked to the assigned lieutenant, so autonomous
+        research shows up in the task/cost tracking system instead of running
+        as a ghost pipeline.
+        """
         from core.research.questions import ResearchQuestion
 
         q: ResearchQuestion = question
@@ -270,6 +275,9 @@ class AutoResearcher:
             lieutenant_id=q.lieutenant_id,
             strategy_used=q.strategy,
         )
+
+        # Create Task row so this research is visible in the task system
+        task_id = self._create_task(q)
 
         try:
             # A. Search
@@ -285,23 +293,158 @@ class AutoResearcher:
             novel = self._novelty_filter(findings)
             step.novel_findings = len(novel)
 
-            # D. Extract entities from novel findings
-            entities = self._extract_entities(novel, q.domain)
+            # D. Extract entities from novel findings (tracks cost via extraction_cost)
+            entities, extraction_cost, extraction_tokens, model_used = self._extract_entities(novel, q.domain)
             step.entities_extracted = len(entities)
+            step.cost_usd += extraction_cost
 
             # E. Store findings in memory and knowledge graph
-            stored = self._store_findings(novel, entities, q)
+            stored = self._store_findings(novel, entities, q, source_task_id=task_id)
             step.memories_stored = stored
 
             step.findings = novel
             step.success = True
 
+            # Mark task complete and update lieutenant + empire stats
+            self._complete_task(
+                task_id=task_id,
+                step=step,
+                quality_score=self._estimate_step_quality(step),
+                tokens=extraction_tokens,
+                model_used=model_used,
+            )
+
         except Exception as exc:
             step.error = str(exc)
-            logger.warning("Research step failed for '%s': %s", q.question[:60], exc)
+            logger.error("Research step failed for '%s': %s", q.question[:60], exc)
+            self._fail_task(task_id, str(exc))
 
         step.duration_seconds = time.time() - start
         return step
+
+    def _create_task(self, q: Any) -> str | None:
+        """Create a Task row for this research question. Returns task_id or None."""
+        try:
+            from db.engine import repo_scope
+            from db.repositories.task import TaskRepository
+
+            with repo_scope(TaskRepository) as repo:
+                task = repo.create(
+                    lieutenant_id=q.lieutenant_id or None,
+                    title=f"Research: {q.question[:180]}",
+                    description=q.question,
+                    task_type="research",
+                    status="executing",
+                    started_at=datetime.now(timezone.utc),
+                    pipeline_stage="executing",
+                    input_json={
+                        "question_id": q.question_id,
+                        "domain": q.domain,
+                        "strategy": q.strategy,
+                        "search_queries": q.search_queries[:3],
+                    },
+                )
+                repo.commit()
+                return task.id
+        except Exception as e:
+            logger.error("Failed to create research task: %s", e)
+            return None
+
+    def _complete_task(
+        self,
+        task_id: str | None,
+        step: ResearchStepResult,
+        quality_score: float,
+        tokens: int,
+        model_used: str,
+    ) -> None:
+        """Mark task complete and cascade stats to lieutenant and empire."""
+        if not task_id:
+            return
+        try:
+            from db.engine import repo_scope
+            from db.repositories.task import TaskRepository
+            from db.repositories.lieutenant import LieutenantRepository
+            from db.repositories.empire import EmpireRepository
+
+            with repo_scope(TaskRepository) as repo:
+                repo.complete_task(
+                    task_id=task_id,
+                    output={
+                        "findings_count": len(step.findings),
+                        "novel_findings": step.novel_findings,
+                        "entities_extracted": step.entities_extracted,
+                        "memories_stored": step.memories_stored,
+                        "sources_searched": step.sources_searched,
+                        "pages_scraped": step.pages_scraped,
+                        "finding_titles": [f.title[:120] for f in step.findings[:10]],
+                    },
+                    quality_score=quality_score,
+                    tokens_output=tokens,
+                    cost_usd=step.cost_usd,
+                    model_used=model_used or None,
+                )
+                repo.commit()
+
+            # Update lieutenant performance
+            if step.lieutenant_id:
+                with repo_scope(LieutenantRepository) as lt_repo:
+                    lt_repo.update_performance(
+                        lieutenant_id=step.lieutenant_id,
+                        task_succeeded=True,
+                        quality_score=quality_score,
+                        cost_usd=step.cost_usd,
+                        execution_time=step.duration_seconds,
+                    )
+                    lt_repo.commit()
+
+            # Update empire aggregate stats
+            with repo_scope(EmpireRepository) as e_repo:
+                e_repo.increment_stats(
+                    empire_id=self.empire_id,
+                    tasks_completed=1,
+                    cost_usd=step.cost_usd,
+                    knowledge_entries=step.entities_extracted,
+                )
+                e_repo.commit()
+        except Exception as e:
+            logger.error("Failed to complete task %s: %s", task_id, e)
+
+    def _fail_task(self, task_id: str | None, error: str) -> None:
+        """Mark task as failed and update lieutenant failure count."""
+        if not task_id:
+            return
+        try:
+            from db.engine import repo_scope
+            from db.repositories.task import TaskRepository
+            from db.repositories.lieutenant import LieutenantRepository
+
+            with repo_scope(TaskRepository) as repo:
+                task = repo.fail_task(task_id, error, increment_retry=False)
+                repo.commit()
+
+            if task and task.lieutenant_id:
+                with repo_scope(LieutenantRepository) as lt_repo:
+                    lt_repo.update_performance(
+                        lieutenant_id=task.lieutenant_id,
+                        task_succeeded=False,
+                    )
+                    lt_repo.commit()
+        except Exception as e:
+            logger.error("Failed to record task failure for %s: %s", task_id, e)
+
+    def _estimate_step_quality(self, step: ResearchStepResult) -> float:
+        """Heuristic quality score for a research step.
+
+        Real critic evaluation doesn't happen here (autoresearcher bypasses ACE),
+        so we score on outcome density: novel findings + entities extracted per source.
+        """
+        if step.sources_searched == 0:
+            return 0.0
+        novelty_ratio = step.novel_findings / max(step.sources_searched, 1)
+        entity_density = min(1.0, step.entities_extracted / 10.0)
+        storage_success = 1.0 if step.memories_stored > 0 else 0.0
+        return round(0.4 * novelty_ratio + 0.4 * entity_density + 0.2 * storage_success, 3)
 
     def _search_phase(self, question: Any) -> list[ResearchFinding]:
         """Search the web using the question's search queries."""
@@ -388,10 +531,15 @@ class AutoResearcher:
 
         return novel
 
-    def _extract_entities(self, findings: list[ResearchFinding], domain: str) -> list[dict]:
-        """Use LLM to extract knowledge entities from research findings."""
+    def _extract_entities(
+        self, findings: list[ResearchFinding], domain: str
+    ) -> tuple[list[dict], float, int, str]:
+        """Use LLM to extract knowledge entities from research findings.
+
+        Returns (entities, cost_usd, tokens_output, model_used).
+        """
         if not findings:
-            return []
+            return [], 0.0, 0, ""
 
         from llm.router import ModelRouter, TaskMetadata
         from llm.base import LLMRequest, LLMMessage
@@ -441,10 +589,15 @@ Rules:
 
         try:
             response = router.execute(request, metadata)
-            return self._parse_entities(response.content)
+            return (
+                self._parse_entities(response.content),
+                float(response.cost_usd or 0.0),
+                int(response.total_tokens or 0),
+                response.model or "",
+            )
         except Exception as exc:
-            logger.warning("Entity extraction failed: %s", exc)
-            return []
+            logger.error("Entity extraction failed: %s", exc)
+            return [], 0.0, 0, ""
 
     def _parse_entities(self, raw: str) -> list[dict]:
         """Parse entity extraction JSON response."""
@@ -474,6 +627,7 @@ Rules:
         findings: list[ResearchFinding],
         entities: list[dict],
         question: Any,
+        source_task_id: str | None = None,
     ) -> int:
         """Store novel findings in memory and knowledge graph."""
         from core.research.questions import ResearchQuestion
@@ -501,7 +655,7 @@ Rules:
                 )
                 stored += 1
             except Exception as exc:
-                logger.debug("Failed to store finding: %s", exc)
+                logger.error("Failed to store finding '%s': %s", finding.title[:60], exc)
 
         from core.knowledge.graph import KnowledgeGraph
         graph = KnowledgeGraph(self.empire_id)
@@ -514,10 +668,11 @@ Rules:
                     description=entity.get("description", "")[:500],
                     confidence=entity.get("confidence", 0.6),
                     tags=entity.get("tags", []) + ["auto_research", q.domain],
+                    source_task_id=source_task_id or "",
                 )
                 stored += 1
             except Exception as exc:
-                logger.debug("Failed to store entity '%s': %s", entity.get("name"), exc)
+                logger.error("Failed to store entity '%s': %s", entity.get("name"), exc)
 
         return stored
 
@@ -625,13 +780,17 @@ Write in a professional intelligence-briefing style. Be specific — cite source
     # ------------------------------------------------------------------
 
     def _check_budget(self) -> bool:
-        """Check if we have budget headroom for a research cycle."""
+        """Check if we have budget headroom for a research cycle.
+
+        Fails closed — if the check itself throws, assume over budget.
+        """
         try:
             from core.routing.budget import BudgetManager
             bm = BudgetManager(self.empire_id)
             return not bm.is_over_budget()
-        except Exception:
-            return True
+        except Exception as e:
+            logger.error("Budget check failed — halting research as precaution: %s", e)
+            return False
 
     def _estimate_confidence(self, source: str) -> float:
         """Estimate confidence based on the source domain."""

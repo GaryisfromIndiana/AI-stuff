@@ -103,7 +103,10 @@ class TaskRepository(BaseRepository[Task]):
 
         execution_time = None
         if task.started_at:
-            execution_time = (now - task.started_at).total_seconds()
+            started = task.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            execution_time = (now - started).total_seconds()
 
         updates: dict[str, Any] = {
             "status": "completed",

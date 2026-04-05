@@ -176,8 +176,8 @@ class ACEEngine:
                 self._max_iterations = s.ace.max_pipeline_iterations
             if min_quality == 0.6:
                 self._min_quality = s.quality.min_confidence_score
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("ACE settings load failed, using defaults: %s", e)
 
     def execute_task(self, task: TaskInput, context: ACEContext | None = None) -> TaskResult:
         """Execute a single task through the full 3-agent pipeline.
@@ -409,7 +409,7 @@ Respond with a structured plan including:
                 "cost": response.cost_usd,
             }
         except Exception as e:
-            logger.warning("Planning failed, proceeding without plan: %s", e)
+            logger.error("Planning failed, proceeding without plan: %s", e)
             return {"plan": "Direct execution (planning skipped)", "error": str(e)}
 
     def _run_execution(

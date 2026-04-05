@@ -618,7 +618,7 @@ class Lieutenant:
                             relation_type=relation.get("type", "related_to"),
                         )
         except Exception as e:
-            logger.debug("Knowledge extraction failed: %s", e)
+            logger.error("Knowledge extraction failed — entities lost: %s", e)
 
     def _store_verified_facts(self, result: TaskResult) -> None:
         """Store editor-verified claims as atomic facts and update source reliability."""
@@ -668,7 +668,7 @@ class Lieutenant:
                     editor.supported_count, editor.contradicted_count,
                 )
         except Exception as e:
-            logger.debug("[%s] Failed to store verified facts: %s", self.name, e)
+            logger.error("[%s] Failed to store verified facts — data lost: %s", self.name, e)
 
     def serialize(self) -> dict:
         """Export lieutenant state for persistence or sharing."""

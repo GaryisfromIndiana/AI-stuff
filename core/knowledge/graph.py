@@ -124,6 +124,8 @@ class KnowledgeGraph:
         from db.engine import repo_scope
         from db.repositories.knowledge import KnowledgeRepository
 
+        from sqlalchemy.exc import IntegrityError
+
         with repo_scope(KnowledgeRepository) as repo:
             # Enrich attributes with temporal data
             enriched_attrs = dict(attributes or {})
@@ -133,36 +135,42 @@ class KnowledgeGraph:
                 enriched_attrs["valid_to"] = valid_to
             enriched_attrs["last_seen"] = datetime.now(timezone.utc).isoformat()
 
-            # Check for existing entity with same name
-            existing = repo.get_by_name(name, self.empire_id)
-            if existing:
-                # Update existing entity — merge attributes, bump confidence
-                merged_attrs = dict(existing.attributes_json or {})
-                merged_attrs.update(enriched_attrs)
-                merged_attrs["update_count"] = merged_attrs.get("update_count", 0) + 1
-
-                update_fields = {"attributes_json": merged_attrs, "updated_at": datetime.now(timezone.utc)}
-                if confidence > existing.confidence:
-                    update_fields["confidence"] = confidence
-                if description and len(description) > len(existing.description or ""):
-                    update_fields["description"] = description
-
-                repo.update(existing.id, **update_fields)
+            # Try insert first — unique constraint catches races
+            try:
+                entity = repo.create(
+                    empire_id=self.empire_id,
+                    entity_type=entity_type,
+                    name=name,
+                    description=description,
+                    attributes_json=enriched_attrs,
+                    confidence=confidence,
+                    source_task_id=source_task_id or None,
+                    tags_json=tags or [],
+                )
                 repo.commit()
-                return {"id": existing.id, "name": name, "action": "updated"}
+                return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}
+            except IntegrityError:
+                repo.rollback()
 
-            entity = repo.create(
-                empire_id=self.empire_id,
-                entity_type=entity_type,
-                name=name,
-                description=description,
-                attributes_json=enriched_attrs,
-                confidence=confidence,
-                source_task_id=source_task_id or None,
-                tags_json=tags or [],
-            )
+            # Constraint hit — update existing instead
+            existing = repo.get_by_name(name, self.empire_id)
+            if not existing:
+                logger.error("Entity '%s' hit unique constraint but not found on re-query", name)
+                return {"name": name, "action": "error"}
+
+            merged_attrs = dict(existing.attributes_json or {})
+            merged_attrs.update(enriched_attrs)
+            merged_attrs["update_count"] = merged_attrs.get("update_count", 0) + 1
+
+            update_fields = {"attributes_json": merged_attrs, "updated_at": datetime.now(timezone.utc)}
+            if confidence > existing.confidence:
+                update_fields["confidence"] = confidence
+            if description and len(description) > len(existing.description or ""):
+                update_fields["description"] = description
+
+            repo.update(existing.id, **update_fields)
             repo.commit()
-            return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}
+            return {"id": existing.id, "name": name, "action": "updated"}
 
     def update_entity(self, name: str, description: str = "", **kwargs) -> bool:
         """Update an existing entity's description or other fields."""

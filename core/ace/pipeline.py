@@ -372,8 +372,8 @@ class Pipeline:
                 for hook in self.config.on_error_hooks:
                     try:
                         hook(context, stage_result)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Pipeline error hook failed: %s", e)
 
             # Handle critic iteration
             if stage.stage_type == StageType.CRITIC and stage_result.success:

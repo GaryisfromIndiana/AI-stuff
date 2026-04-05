@@ -435,12 +435,6 @@ def _dispatch_action(
         audit = maintainer.deep_llm_audit(batch_size=20)
         return {"status": "completed", "audit": audit}
 
-    elif action == "CONTENT":
-        from core.content.generator import ContentGenerator
-        gen = ContentGenerator(empire_id)
-        report = gen.generate_topic_report(topic)
-        return {"status": "completed", "report": report}
-
     elif action == "PIPELINE":
         from core.research.pipeline import ResearchPipeline
         pipeline = ResearchPipeline(empire_id)

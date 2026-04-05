@@ -193,7 +193,8 @@ class MemoryManager:
                     for entry in entries:
                         entry.refresh()
                     repo.flush()
-                except Exception:
+                except Exception as e:
+                    logger.warning("Memory access refresh failed (non-critical): %s", e)
                     repo.rollback()
 
             return [
@@ -767,8 +768,8 @@ class MemoryManager:
                         recency_boost = 0.15
                     elif age_hours < 720:  # 30 days
                         recency_boost = 0.05
-                except Exception:
-                    pass
+                except (ValueError, TypeError, AttributeError):
+                    pass  # date parsing — skip boost if timestamp is malformed
 
             return importance + recency_boost
 

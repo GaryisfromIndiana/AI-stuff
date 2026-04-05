@@ -435,6 +435,7 @@ class KnowledgeEntity(Base):
         Index("ix_knowledge_entities_confidence", "confidence"),
         Index("ix_knowledge_entities_importance", "importance_score"),
         Index("ix_knowledge_entities_empire_type", "empire_id", "entity_type"),
+        UniqueConstraint("empire_id", "name", "entity_type", name="uq_entity_name_type_per_empire"),
         CheckConstraint("confidence >= 0.0 AND confidence <= 1.0", name="ck_entity_confidence"),
     )
 
@@ -892,7 +893,7 @@ class HealthCheck(Base):
         Index("ix_health_checks_type", "check_type"),
         Index("ix_health_checks_status", "status"),
         Index("ix_health_checks_created_at", "created_at"),
-        CheckConstraint("status IN ('healthy', 'degraded', 'unhealthy')", name="ck_health_status"),
+        CheckConstraint("status IN ('healthy', 'unhealthy', 'unknown')", name="ck_health_status"),
     )
 
     def __repr__(self) -> str:

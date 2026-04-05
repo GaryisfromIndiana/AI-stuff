@@ -100,7 +100,11 @@ class StrategyTracker:
         findings: int,
         cost_usd: float,
     ) -> None:
-        """Record the outcome of a research step for future strategy selection."""
+        """Record the outcome of a research step for future strategy selection.
+
+        Stores the numeric data in metadata_json so downstream reads don't
+        have to string-parse content. Content remains human-readable for logs.
+        """
         from core.memory.manager import MemoryManager
 
         mm = MemoryManager(self.empire_id)
@@ -117,47 +121,31 @@ class StrategyTracker:
             importance=0.4,
             tags=["research_strategy", strategy, domain],
             source_type="autonomous",
+            metadata={
+                "strategy": strategy,
+                "domain": domain,
+                "efficiency": float(efficiency),
+                "findings": int(findings),
+                "cost_usd": float(cost_usd),
+            },
         )
 
     def get_strategy_stats(self) -> dict[str, ResearchStrategy]:
         """Get aggregated stats for all strategies."""
-        from core.memory.manager import MemoryManager
+        stats: dict[str, ResearchStrategy] = {name: ResearchStrategy(name=name) for name in STRATEGIES}
 
-        mm = MemoryManager(self.empire_id)
-        memories = mm.recall(
-            query="Research strategy outcome",
-            memory_types=["experiential"],
-            limit=100,
-        )
-
-        stats: dict[str, ResearchStrategy] = {}
-        for name in STRATEGIES:
-            stats[name] = ResearchStrategy(name=name)
-
-        for mem in memories:
-            content = mem.get("content", "")
-            for name in STRATEGIES:
-                if f"Research strategy outcome: {name}" in content:
-                    s = stats[name]
-                    s.total_runs += 1
-                    try:
-                        eff_line = [line for line in content.split("\n") if "Efficiency:" in line]
-                        if eff_line:
-                            eff_str = eff_line[0].split("Efficiency:")[1].split("(")[0].strip()
-                            s.avg_efficiency = (
-                                (s.avg_efficiency * (s.total_runs - 1) + float(eff_str))
-                                / s.total_runs
-                            )
-                        find_line = [line for line in content.split("\n") if "Findings:" in line]
-                        if find_line:
-                            parts = find_line[0].split("Findings:")[1].split(",")
-                            s.total_findings += int(parts[0].strip())
-                            if len(parts) > 1 and "Cost:" in parts[1]:
-                                cost_str = parts[1].split("$")[1].strip()
-                                s.total_cost_usd += float(cost_str)
-                    except (ValueError, IndexError):
-                        pass
-                    break
+        for meta in self._load_outcomes(limit=200):
+            name = meta.get("strategy", "")
+            if name not in stats:
+                continue
+            s = stats[name]
+            s.total_runs += 1
+            eff = float(meta.get("efficiency", 0.0))
+            s.avg_efficiency = (
+                (s.avg_efficiency * (s.total_runs - 1) + eff) / s.total_runs
+            )
+            s.total_findings += int(meta.get("findings", 0))
+            s.total_cost_usd += float(meta.get("cost_usd", 0.0))
 
         return stats
 
@@ -165,31 +153,34 @@ class StrategyTracker:
     # Internal
     # ------------------------------------------------------------------
 
-    def _get_strategy_scores(self, domain: str) -> dict[str, float]:
-        """Get efficiency scores for each strategy in this domain."""
+    def _load_outcomes(self, limit: int = 100, domain: str | None = None) -> list[dict]:
+        """Load strategy outcome metadata, filtered by domain if given."""
         from core.memory.manager import MemoryManager
 
         mm = MemoryManager(self.empire_id)
-        memories = mm.recall(
-            query=f"Research strategy outcome {domain}",
-            memory_types=["experiential"],
-            limit=30,
-        )
+        query = f"Research strategy outcome {domain}" if domain else "Research strategy outcome"
+        memories = mm.recall(query=query, memory_types=["experiential"], limit=limit)
 
+        out: list[dict] = []
+        for mem in memories:
+            meta = mem.get("metadata") or {}
+            if not isinstance(meta, dict):
+                continue
+            if "strategy" not in meta or "efficiency" not in meta:
+                continue  # skip legacy string-only entries
+            if domain and meta.get("domain") != domain:
+                continue
+            out.append(meta)
+        return out
+
+    def _get_strategy_scores(self, domain: str) -> dict[str, float]:
+        """Get efficiency scores for each strategy in this domain."""
         scores: dict[str, list[float]] = {s: [] for s in STRATEGIES}
 
-        for mem in memories:
-            content = mem.get("content", "")
-            for name in STRATEGIES:
-                if f"Research strategy outcome: {name}" in content and domain in content:
-                    try:
-                        eff_line = [line for line in content.split("\n") if "Efficiency:" in line]
-                        if eff_line:
-                            eff_str = eff_line[0].split("Efficiency:")[1].split("(")[0].strip()
-                            scores[name].append(float(eff_str))
-                    except (ValueError, IndexError):
-                        pass
-                    break
+        for meta in self._load_outcomes(limit=50, domain=domain):
+            name = meta.get("strategy", "")
+            if name in scores:
+                scores[name].append(float(meta.get("efficiency", 0.0)))
 
         result: dict[str, float] = {}
         for name in STRATEGIES:

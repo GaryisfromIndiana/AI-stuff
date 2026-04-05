@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Optional
 
+from core.errors import TransientError, ConfigError, FatalError
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,7 +89,8 @@ class SchedulerDaemon:
         try:
             from config.settings import get_settings
             s = get_settings().scheduler
-        except Exception:
+        except Exception as e:
+            logger.error("Scheduler settings load failed, using defaults: %s", e)
             class DefaultScheduler:
                 health_check_interval_minutes = 5
                 learning_cycle_hours = 6
@@ -173,7 +176,12 @@ class SchedulerDaemon:
                     for job in self._jobs.values():
                         db_job = db_jobs.get(job.job_type)
                         if db_job and db_job.last_run_at:
-                            job.last_run = db_job.last_run_at
+                            # SQLite strips tzinfo — coerce to UTC so tick
+                            # math with datetime.now(timezone.utc) works.
+                            last_run = db_job.last_run_at
+                            if last_run.tzinfo is None:
+                                last_run = last_run.replace(tzinfo=timezone.utc)
+                            job.last_run = last_run
                             job.run_count = db_job.run_count or 0
                             job.error_count = db_job.error_count or 0
                             job.consecutive_errors = db_job.consecutive_errors or 0
@@ -183,69 +191,85 @@ class SchedulerDaemon:
             if synced:
                 logger.info("Synced %d jobs from DB — resuming from last known state", synced)
         except Exception as e:
-            logger.debug("DB sync on startup skipped: %s", e)
+            logger.error("DB sync on startup failed — job state may be lost: %s", e)
         return synced
 
     def _sync_to_db(self) -> None:
         """Persist current job state to the scheduler_jobs table.
 
-        Called after each tick so job state survives process restarts.
+        Per-row commits so one worker losing a race (UniqueConstraint on
+        empire_id + job_type) doesn't roll back every other job in the batch.
+        Previously a single conflict in a multi-worker setup killed the
+        entire sync and nothing landed — which is exactly how scheduler_jobs
+        stayed at 0 rows in production.
         """
-        try:
-            from db.engine import session_scope
-            from db.models import SchedulerJob
-            from sqlalchemy import select
+        from db.engine import get_session
+        from db.models import SchedulerJob
+        from sqlalchemy import select
+        from sqlalchemy.exc import IntegrityError
 
-            with session_scope() as session:
-                with self._lock:
-                    for job in self._jobs.values():
-                        # Upsert: find existing or create
-                        existing = session.execute(
-                            select(SchedulerJob).where(
-                                SchedulerJob.empire_id == self.empire_id,
-                                SchedulerJob.job_type == job.job_type,
-                            )
-                        ).scalar_one_or_none()
+        with self._lock:
+            snapshot = list(self._jobs.values())
 
-                        now = datetime.now(timezone.utc)
-                        next_run = None
-                        if job.last_run:
-                            from datetime import timedelta
-                            next_run = job.last_run + timedelta(seconds=job.interval_seconds)
+        persisted = 0
+        for job in snapshot:
+            session = get_session()
+            try:
+                existing = session.execute(
+                    select(SchedulerJob).where(
+                        SchedulerJob.empire_id == self.empire_id,
+                        SchedulerJob.job_type == job.job_type,
+                    )
+                ).scalar_one_or_none()
 
-                        if existing:
-                            existing.last_run_at = job.last_run
-                            existing.next_run_at = next_run
-                            existing.run_count = job.run_count
-                            existing.success_count = job.run_count - job.error_count
-                            existing.error_count = job.error_count
-                            existing.consecutive_errors = job.consecutive_errors
-                            existing.last_error = job.last_error or None
-                            existing.avg_duration_ms = job.avg_duration_ms or None
-                            existing.enabled = job.enabled
-                            existing.status = "active" if job.enabled else "disabled"
-                        else:
-                            db_job = SchedulerJob(
-                                empire_id=self.empire_id,
-                                job_type=job.job_type,
-                                name=job.name,
-                                description=job.description,
-                                status="active" if job.enabled else "disabled",
-                                enabled=job.enabled,
-                                interval_seconds=job.interval_seconds,
-                                priority=job.priority,
-                                last_run_at=job.last_run,
-                                next_run_at=next_run,
-                                run_count=job.run_count,
-                                success_count=job.run_count - job.error_count,
-                                error_count=job.error_count,
-                                consecutive_errors=job.consecutive_errors,
-                                last_error=job.last_error or None,
-                                avg_duration_ms=job.avg_duration_ms or None,
-                            )
-                            session.add(db_job)
-        except Exception as e:
-            logger.debug("DB sync after tick failed: %s", e)
+                next_run = None
+                if job.last_run:
+                    next_run = job.last_run + timedelta(seconds=job.interval_seconds)
+
+                if existing:
+                    existing.last_run_at = job.last_run
+                    existing.next_run_at = next_run
+                    existing.run_count = job.run_count
+                    existing.success_count = job.run_count - job.error_count
+                    existing.error_count = job.error_count
+                    existing.consecutive_errors = job.consecutive_errors
+                    existing.last_error = job.last_error or None
+                    existing.avg_duration_ms = job.avg_duration_ms or None
+                    existing.enabled = job.enabled
+                    existing.status = "active" if job.enabled else "disabled"
+                else:
+                    session.add(SchedulerJob(
+                        empire_id=self.empire_id,
+                        job_type=job.job_type,
+                        name=job.name,
+                        description=job.description,
+                        status="active" if job.enabled else "disabled",
+                        enabled=job.enabled,
+                        interval_seconds=job.interval_seconds,
+                        priority=job.priority,
+                        last_run_at=job.last_run,
+                        next_run_at=next_run,
+                        run_count=job.run_count,
+                        success_count=job.run_count - job.error_count,
+                        error_count=job.error_count,
+                        consecutive_errors=job.consecutive_errors,
+                        last_error=job.last_error or None,
+                        avg_duration_ms=job.avg_duration_ms or None,
+                    ))
+
+                session.commit()
+                persisted += 1
+            except IntegrityError:
+                # Another worker beat us to this row — not an error, just a race
+                session.rollback()
+            except Exception as e:
+                session.rollback()
+                logger.error("Failed to persist scheduler job %s: %s", job.job_type, e)
+            finally:
+                session.close()
+
+        if persisted:
+            logger.debug("Persisted %d/%d scheduler jobs", persisted, len(snapshot))
 
     def start(self) -> None:
         """Start the scheduler daemon in a background thread.
@@ -273,6 +297,11 @@ class SchedulerDaemon:
                 for job in self._jobs.values():
                     if job.name not in immediate_jobs:
                         job.last_run = now  # Will wait full interval before first run
+
+        # Persist job registry IMMEDIATELY, before any tick runs.  Previously
+        # sync only fired after a successful tick, so if the process died
+        # before any job executed, scheduler_jobs stayed empty forever.
+        self._sync_to_db()
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="empire-scheduler")
         self._thread.start()
@@ -303,37 +332,70 @@ class SchedulerDaemon:
 
             self._stop_event.wait(timeout=self.tick_interval)
 
-    def _try_acquire_tick_lock(self) -> bool:
+    def _acquire_tick_lock(self):
         """Try to acquire a Postgres advisory lock for this tick.
 
-        Returns True if this worker should run the tick.
-        On SQLite or connection failure, always returns True.
+        Returns (conn, True) if this worker is leader, (None, False) if
+        another worker holds the lock, (None, True) if no Postgres (no
+        mutex needed — SQLite, tests, etc).
+
+        Caller MUST call _release_tick_lock(conn) in a finally block.
+        Previously the lock was acquired and released in the same call,
+        giving zero mutual exclusion during the actual tick work.
         """
         try:
             from db.engine import get_engine
+            from sqlalchemy import text
             engine = get_engine()
             if "postgresql" not in str(engine.url):
-                return True
-            from sqlalchemy import text
-            with engine.connect() as conn:
+                return None, True
+            conn = engine.connect()
+            try:
                 result = conn.execute(text("SELECT pg_try_advisory_lock(42)"))
-                acquired = result.scalar()
-                if acquired:
-                    conn.execute(text("SELECT pg_advisory_unlock(42)"))
-                return bool(acquired)
-        except Exception:
-            return True
+                acquired = bool(result.scalar())
+            except Exception as e:
+                conn.close()
+                logger.warning("Advisory lock query failed, proceeding without mutex: %s", e)
+                return None, True
+            if not acquired:
+                conn.close()
+                return None, False
+            return conn, True
+        except Exception as e:
+            logger.warning("Advisory lock setup failed, proceeding without mutex: %s", e)
+            return None, True
+
+    def _release_tick_lock(self, conn) -> None:
+        """Release the advisory lock held by _acquire_tick_lock."""
+        if conn is None:
+            return
+        try:
+            from sqlalchemy import text
+            conn.execute(text("SELECT pg_advisory_unlock(42)"))
+        except Exception as e:
+            logger.warning("Advisory lock release failed: %s", e)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def tick(self) -> list[str]:
         """Execute a single scheduler tick.
 
-        Uses Postgres advisory lock so only one worker runs jobs per tick.
-
-        Returns:
-            List of job names that were executed.
+        Holds a Postgres advisory lock for the whole tick so only one
+        worker executes jobs at a time. Returns empty list if another
+        worker already holds the lock.
         """
-        if not self._try_acquire_tick_lock():
+        conn, is_leader = self._acquire_tick_lock()
+        if not is_leader:
             return []
+        try:
+            return self._do_tick()
+        finally:
+            self._release_tick_lock(conn)
+
+    def _do_tick(self) -> list[str]:
 
         with self._lock:
             self._tick_count += 1
@@ -369,36 +431,75 @@ class SchedulerDaemon:
 
                 logger.debug("Job %s completed in %.1fms", job.name, duration_ms)
 
+            except TransientError as e:
+                # Self-healing — don't count toward consecutive errors
+                with self._lock:
+                    job.error_count += 1
+                    job.last_error = str(e)
+                    self._total_errors += 1
+                logger.warning("Job %s transient failure (will retry): %s", job.name, e)
+
+            except ConfigError as e:
+                # Permanent until human fixes — disable this job
+                with self._lock:
+                    job.error_count += 1
+                    job.consecutive_errors += 1
+                    job.last_error = str(e)
+                    job.enabled = False
+                    job.metadata_json = job.metadata_json or {}
+                    job.metadata_json["disabled_reason"] = "config_error"
+                    self._total_errors += 1
+                logger.error("Job %s disabled — config error: %s", job.name, e)
+
+            except FatalError as e:
+                # System-wide problem — disable all expensive jobs
+                with self._lock:
+                    job.error_count += 1
+                    job.last_error = str(e)
+                    self._total_errors += 1
+                    for j in self._jobs.values():
+                        if j.priority >= 4:  # research + quality jobs
+                            j.enabled = False
+                            j.metadata_json = j.metadata_json or {}
+                            j.metadata_json["disabled_reason"] = "fatal_error"
+                            j.metadata_json["disabled_at_tick"] = self._tick_count
+                logger.critical("Job %s fatal error — all expensive jobs disabled: %s", job.name, e)
+
             except Exception as e:
                 with self._lock:
                     job.error_count += 1
                     job.consecutive_errors += 1
                     job.last_error = str(e)
                     self._total_errors += 1
-                logger.error("Job %s failed: %s", job.name, e)
+                logger.error("Job %s failed (unclassified): %s", job.name, e, exc_info=True)
 
                 with self._lock:
-                    # Disable job after 20 consecutive errors (auto-re-enables after 10 ticks)
                     if job.consecutive_errors >= 20:
                         job.enabled = False
                         job.metadata_json = job.metadata_json or {}
                         job.metadata_json["disabled_at_tick"] = self._tick_count
-                        logger.warning("Job %s disabled after %d consecutive errors", job.name, job.consecutive_errors)
+                        logger.error("Job %s disabled after %d consecutive errors", job.name, job.consecutive_errors)
 
-        # Auto-re-enable disabled jobs after 10 ticks (~50 min)
+        # Auto-re-enable disabled jobs after 10 ticks (~10 min)
+        # EXCEPT config errors — those need a human fix, not a timer
         with self._lock:
             for job in self._jobs.values():
                 if not job.enabled:
                     meta = getattr(job, "metadata_json", None) or {}
+                    reason = meta.get("disabled_reason", "")
+                    if reason in ("config_error", "fatal_error"):
+                        continue  # don't auto-re-enable — needs human intervention
                     disabled_at = meta.get("disabled_at_tick", 0)
                     if self._tick_count - disabled_at >= 10:
                         job.enabled = True
                         job.consecutive_errors = 0
                         logger.info("Job %s auto-re-enabled after cooldown", job.name)
 
-        # Persist job state to DB so it survives process restarts
-        if executed:
-            self._sync_to_db()
+        # Persist job state every tick — not just when jobs ran.  Even an
+        # idle tick bumps metadata (tick_count, consecutive_errors cooldown),
+        # and this is the only place "no jobs ran" state gets a chance to
+        # survive a restart.
+        self._sync_to_db()
 
         return executed
 
