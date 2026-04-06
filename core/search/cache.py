@@ -121,20 +121,19 @@ class ScrapeCache:
         word_count: int = 0,
         ttl_hours: int | None = None,
     ) -> None:
-        """Cache a scraped page.
+        """Cache a scraped page, replacing any existing entry for this URL.
 
-        Args:
-            url: URL that was scraped.
-            title: Page title.
-            content: Extracted content.
-            domain: Source domain.
-            word_count: Word count.
-            ttl_hours: Cache TTL in hours.
+        Previously this blindly inserted on every call — same URL scraped
+        10 times = 10 rows. Production had 9,689 scrape_cache entries,
+        most duplicates. Now does upsert: delete old entry first, then insert.
         """
         url_hash = self._hash_url(url)
         ttl = ttl_hours or self.DEFAULT_TTL_HOURS
 
         try:
+            # Remove existing cache entry for this URL before inserting
+            self.invalidate(url)
+
             from core.memory.manager import MemoryManager
             mm = MemoryManager(self.empire_id)
             mm.store(
@@ -142,7 +141,7 @@ class ScrapeCache:
                 memory_type=self.CACHE_MEMORY_TYPE,
                 title=f"Cache: {title[:80]}" if title else f"Cache: {domain}",
                 category=self.CACHE_CATEGORY,
-                importance=0.3,  # Low importance — it's a cache
+                importance=0.3,
                 tags=["scrape_cache", domain],
                 source_type="scrape_cache",
                 expires_hours=ttl,
