@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Generic, Optional, TypeVar, Type, Sequence
+from typing import Any, Generic, TypeVar
 
-from sqlalchemy import select, func, delete, update, and_, or_, desc, asc
+from sqlalchemy import and_, asc, delete, desc, func, select, update
 from sqlalchemy.orm import Session
 
 from db.models import Base
@@ -24,7 +23,7 @@ class BaseRepository(Generic[T]):
             model_class = Lieutenant
     """
 
-    model_class: Type[T]
+    model_class: type[T]
 
     def __init__(self, session: Session):
         self.session = session

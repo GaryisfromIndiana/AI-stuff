@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +87,7 @@ class EntityQualityScorer:
 
             attrs = entity.attributes_json or {}
             tags = entity.tags_json or []
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             qs = EntityQualityScore(entity_id=entity_id, entity_name=entity.name)
 
@@ -146,7 +145,7 @@ class EntityQualityScorer:
             schema = get_schema(entity.entity_type)
             if schema:
                 total_fields = len(schema.fields)
-                filled = sum(1 for f in schema.fields if f.name in attrs and attrs[f.name])
+                filled = sum(1 for f in schema.fields if attrs.get(f.name))
                 qs.completeness = filled / max(total_fields, 1)
             else:
                 # No schema — check how many attrs exist

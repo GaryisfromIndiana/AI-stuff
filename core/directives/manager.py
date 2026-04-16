@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +142,8 @@ class DirectiveManager:
         logger.info("Executing directive: %s", db_directive.title)
 
         # 1. Planning phase (War Room)
-        from core.warroom.session import WarRoomSession
         from core.lieutenant.manager import LieutenantManager
+        from core.warroom.session import WarRoomSession
 
         lt_manager = LieutenantManager(self.empire_id)
         all_lts = lt_manager.list_lieutenants(status="active")  # Single DB call
@@ -247,6 +246,7 @@ class DirectiveManager:
 
             # Execute tasks in parallel within the wave
             from concurrent.futures import ThreadPoolExecutor, as_completed
+
             from config.settings import get_settings
 
             def _execute_one(task_data_and_lt):
@@ -290,9 +290,9 @@ class DirectiveManager:
             # IMPORTANT: last_error MUST be set when status='failed', otherwise
             # the row is unactionable — this was the 27-tasks-NULL-error bug.
             try:
-                from db.models import Task as TaskModel
                 from db.engine import session_scope
-                now_utc = datetime.now(timezone.utc)
+                from db.models import Task as TaskModel
+                now_utc = datetime.now(UTC)
                 for item in task_records:
                     r = item["result"]
                     td = item["task_data"]
@@ -359,7 +359,7 @@ class DirectiveManager:
                 directive_id,
                 status="completed",
                 pipeline_stage="delivered",
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
                 total_cost_usd=total_cost,
             )
             repo.commit()
@@ -438,7 +438,7 @@ class DirectiveManager:
         from db.engine import repo_scope
         from db.repositories.directive import DirectiveRepository
         with repo_scope(DirectiveRepository) as repo:
-            result = repo.update(directive_id, status="cancelled", completed_at=datetime.now(timezone.utc))
+            result = repo.update(directive_id, status="cancelled", completed_at=datetime.now(UTC))
             repo.commit()
             return result is not None
 
@@ -453,8 +453,9 @@ class DirectiveManager:
         """Use LLM to generate a proper task breakdown when War Room produces no waves."""
         try:
             import json
+
+            from llm.base import LLMMessage, LLMRequest
             from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
 
             router = ModelRouter(self.empire_id)
 

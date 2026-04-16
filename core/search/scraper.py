@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
 from urllib.parse import urlparse
 
 import trafilatura
@@ -306,7 +305,7 @@ class WebScraper:
         header = f"## {page.title or page.url}\n_Source: {page.domain}_"
         if page.date:
             header += f" _| {page.date}_"
-        header += f"\n\n"
+        header += "\n\n"
 
         return header + page.content[:max_chars]
 

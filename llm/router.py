@@ -3,17 +3,51 @@
 from __future__ import annotations
 
 import logging
-import time
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Protocol, runtime_checkable
 
-from config.settings import get_settings, MODEL_CATALOG, LLMModelConfig
+from config.settings import MODEL_CATALOG, LLMModelConfig, get_settings
 from llm.base import LLMClient, LLMRequest, LLMResponse
-from llm.cache import get_cache, cache_llm_response
-from utils.circuit_breaker import get_circuit, CircuitOpenError
+from llm.cache import cache_llm_response, get_cache
+from utils.circuit_breaker import CircuitOpenError, get_circuit
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Spend recording — inversion of control so llm/ doesn't import core/.
+# Edges (web/, cli/) register a factory at bootstrap. See ARCHITECTURE.md.
+# ─────────────────────────────────────────────────────────────────────
+@runtime_checkable
+class SpendRecorder(Protocol):
+    """Anything that can persist an LLM spend event (e.g. core.routing.budget.BudgetManager)."""
+
+    def record_spend(
+        self,
+        cost_usd: float,
+        model: str,
+        provider: str,
+        tokens_input: int,
+        tokens_output: int,
+        purpose: str = "llm_call",
+    ) -> None: ...
+
+
+SpendRecorderFactory = Callable[[str], SpendRecorder]
+_spend_recorder_factory: SpendRecorderFactory | None = None
+
+
+def register_spend_recorder_factory(factory: SpendRecorderFactory | None) -> None:
+    """Register a factory that builds a SpendRecorder for a given empire_id.
+
+    Call once at app startup. Passing ``None`` clears the factory (useful in tests).
+    If no factory is registered, the router silently skips cost recording.
+    """
+    global _spend_recorder_factory
+    _spend_recorder_factory = factory
 
 
 @dataclass
@@ -25,8 +59,8 @@ class TaskMetadata:
     estimated_tokens: int = 2000
     budget_remaining_usd: float = 100.0
     priority: int = 5  # 1 = highest
-    preferred_provider: Optional[str] = None
-    preferred_model: Optional[str] = None
+    preferred_provider: str | None = None
+    preferred_model: str | None = None
     require_tool_use: bool = False
     require_vision: bool = False
     require_json_output: bool = False
@@ -40,7 +74,7 @@ class RoutingDecision:
     provider: str
     estimated_cost_usd: float
     reasoning: str
-    fallback_model: Optional[str] = None
+    fallback_model: str | None = None
     confidence: float = 0.9
 
 
@@ -61,8 +95,8 @@ class ModelHealth:
     available: bool = True
     avg_latency_ms: float = 0.0
     error_rate: float = 0.0
-    last_success: Optional[float] = None
-    last_error: Optional[float] = None
+    last_success: float | None = None
+    last_error: float | None = None
     consecutive_errors: int = 0
     total_requests: int = 0
     total_errors: int = 0
@@ -559,13 +593,17 @@ class ModelRouter:
         )
 
     def _record_cost(self, response: LLMResponse, model_key: str, provider: str) -> None:
-        """Record LLM cost to the budget_logs table."""
+        """Record LLM cost via the registered spend recorder (if any)."""
         if response.cost_usd <= 0:
             return
+        if _spend_recorder_factory is None:
+            # No recorder registered — fine for tests and for entry points that
+            # don't care about budget tracking. Logged at debug to avoid noise.
+            logger.debug("No SpendRecorder factory registered; skipping cost recording.")
+            return
         try:
-            from core.routing.budget import BudgetManager
-            bm = BudgetManager(self._empire_id)
-            bm.record_spend(
+            recorder = _spend_recorder_factory(self._empire_id)
+            recorder.record_spend(
                 cost_usd=response.cost_usd,
                 model=model_key,
                 provider=provider,

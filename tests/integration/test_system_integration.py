@@ -7,8 +7,6 @@ Tests the real flow: store → recall → supersede → decay → cleanup.
 from __future__ import annotations
 
 import os
-import time
-from datetime import datetime, timezone, timedelta
 
 import pytest
 
@@ -281,8 +279,8 @@ class TestGodPanelCommand:
 
     def test_command_lifecycle(self):
         _ensure_empire()
+        from db.engine import read_session, session_scope
         from db.models import GodPanelCommand
-        from db.engine import session_scope, read_session
 
         # Create
         with session_scope() as session:
@@ -327,7 +325,7 @@ class TestSchedulerTick:
 
     def test_tick_executes_due_jobs(self):
         _ensure_empire()
-        from core.scheduler.daemon import SchedulerDaemon, JobConfig
+        from core.scheduler.daemon import JobConfig, SchedulerDaemon
 
         daemon = SchedulerDaemon(EMPIRE_ID)
 
@@ -346,7 +344,7 @@ class TestSchedulerTick:
         assert len(calls) == 1
 
     def test_tick_skips_not_due_jobs(self):
-        from core.scheduler.daemon import SchedulerDaemon, JobConfig
+        from core.scheduler.daemon import JobConfig, SchedulerDaemon
 
         daemon = SchedulerDaemon(EMPIRE_ID)
         daemon._jobs.clear()
@@ -368,7 +366,7 @@ class TestSchedulerTick:
         assert len(calls) == 1
 
     def test_tick_tracks_errors(self):
-        from core.scheduler.daemon import SchedulerDaemon, JobConfig
+        from core.scheduler.daemon import JobConfig, SchedulerDaemon
 
         daemon = SchedulerDaemon(EMPIRE_ID)
         daemon._jobs.clear()
@@ -440,6 +438,7 @@ class TestEmpireRouteWithDB:
     def test_api_health_returns_json(self):
         _ensure_empire()
         from flask import Flask
+
         from web.routes.api import api_bp
 
         app = Flask(__name__)

@@ -1,5 +1,6 @@
 """Test memory compression directly."""
 import db.engine as _eng
+
 _eng._engine = None
 
 from core.memory.compression import MemoryCompressor

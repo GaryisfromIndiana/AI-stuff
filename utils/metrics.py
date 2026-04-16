@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-import time
 import threading
-from collections import defaultdict
+import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -311,7 +310,7 @@ class MetricsCollector:
             "counters": {name: c.value for name, c in self._counters.items()},
             "gauges": {name: g.value for name, g in self._gauges.items()},
             "histograms": {name: h.summary() for name, h in self._histograms.items()},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 

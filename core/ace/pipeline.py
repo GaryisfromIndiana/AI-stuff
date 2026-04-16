@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +34,9 @@ class PipelineContext:
     requirements: list[str] = field(default_factory=list)
 
     # Stage outputs (accumulated as pipeline progresses)
-    planning_output: Optional[dict] = None
-    execution_output: Optional[dict] = None
-    critic_output: Optional[dict] = None
+    planning_output: dict | None = None
+    execution_output: dict | None = None
+    critic_output: dict | None = None
     custom_outputs: dict = field(default_factory=dict)
 
     # Iteration tracking

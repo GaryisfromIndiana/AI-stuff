@@ -8,7 +8,6 @@ the backfill scheduler job.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 _MAX_CHARS = 24_000
 
 
-def generate_embedding(text: str) -> Optional[list[float]]:
+def generate_embedding(text: str) -> list[float] | None:
     """Generate an embedding vector for text.
 
     Returns None on any failure (missing API key, rate limit, etc.)
@@ -36,7 +35,7 @@ def generate_embedding(text: str) -> Optional[list[float]]:
         return None
 
 
-def generate_embeddings_batch(texts: list[str]) -> list[Optional[list[float]]]:
+def generate_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
     """Generate embeddings for multiple texts.
 
     Returns a list parallel to input — None for any that failed.
@@ -52,7 +51,7 @@ def generate_embeddings_batch(texts: list[str]) -> list[Optional[list[float]]]:
         logger.debug("OpenAI client init failed: %s", e)
         return [None] * len(texts)
 
-    results: list[Optional[list[float]]] = [None] * len(texts)
+    results: list[list[float] | None] = [None] * len(texts)
     chunk_size = 100
 
     for start in range(0, len(texts), chunk_size):
@@ -82,9 +81,10 @@ def backfill_embeddings(empire_id: str, batch_size: int = 50) -> dict:
     Processes a batch per call to avoid hammering the embedding API.
     Called by the scheduler's embedding_backfill job.
     """
+    from sqlalchemy import String, and_, cast, or_, select
+
     from db.engine import session_scope
-    from db.models import MemoryEntry, KnowledgeEntity
-    from sqlalchemy import select, and_, or_, cast, String
+    from db.models import KnowledgeEntity, MemoryEntry
 
     total_filled = 0
     kg_filled = 0

@@ -1,0 +1,30 @@
+# Pre-commit hooks — optional locally, mandatory in CI.
+# Install: pre-commit install
+# Run on all files: pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      # TODO: enable once a one-shot `ruff format .` has been run and committed.
+      # - id: ruff-format
+
+  - repo: https://github.com/seddonym/import-linter
+    rev: v2.1
+    hooks:
+      - id: import-linter
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - pydantic>=2.0
+          - types-requests
+          - types-redis
+        args: [--config-file=pyproject.toml]
+        # Only check the strict-island modules in pre-commit to keep it fast.
+        # CI runs the full check.
+        files: ^(config|utils|llm/schemas\.py)/

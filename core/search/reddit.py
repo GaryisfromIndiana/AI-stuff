@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-import urllib.request
 import urllib.parse
+import urllib.request
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ class RedditSearcher:
             # Format timestamp
             if created:
                 import datetime
-                dt = datetime.datetime.fromtimestamp(created, tz=datetime.timezone.utc)
+                dt = datetime.datetime.fromtimestamp(created, tz=datetime.UTC)
                 date_str = dt.strftime("%Y-%m-%d")
             else:
                 date_str = ""

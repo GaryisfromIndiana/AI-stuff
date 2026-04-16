@@ -6,11 +6,11 @@ import logging
 import threading
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
-from typing import Callable, Optional
 
-from flask import request, jsonify
+from flask import jsonify, request
 
 logger = logging.getLogger(__name__)
 

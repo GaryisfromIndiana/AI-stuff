@@ -1,6 +1,6 @@
 """Evolution system — self-improvement cycles and prompt evolution."""
 
-from core.evolution.cycle import EvolutionCycleManager, CycleResult, CycleStats
-from core.evolution.prompt_evolution import PromptEvolver, PromptEvolution
+from core.evolution.cycle import CycleResult, CycleStats, EvolutionCycleManager
+from core.evolution.prompt_evolution import PromptEvolution, PromptEvolver
 
-__all__ = ["EvolutionCycleManager", "CycleResult", "CycleStats", "PromptEvolver", "PromptEvolution"]
+__all__ = ["CycleResult", "CycleStats", "EvolutionCycleManager", "PromptEvolution", "PromptEvolver"]

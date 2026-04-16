@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
+
+# Re-export the JSON parsing helper for backward compatibility.
+# The canonical location is now utils.text — please prefer importing from there.
+from utils.text import _extract_json_block, _find_json_object, safe_json_loads
 
 logger = logging.getLogger(__name__)
 
@@ -259,24 +263,6 @@ class RetrospectiveOutput(BaseModel):
 # Schema utilities
 # ═══════════════════════════════════════════════════════════════════════════
 
-def safe_json_loads(content: str, default: dict | None = None) -> dict:
-    """Parse JSON from LLM output with fallback extraction.
-
-    Tries direct parse, then markdown code block extraction, then brace matching.
-    """
-    try:
-        return json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        pass
-    json_str = _extract_json_block(content) or _find_json_object(content)
-    if json_str:
-        try:
-            return json.loads(json_str)
-        except json.JSONDecodeError:
-            pass
-    return default if default is not None else {}
-
-
 def pydantic_to_tool_schema(model_class: type[BaseModel], description: str = "") -> dict:
     """Convert a Pydantic model to an LLM tool/function schema.
 
@@ -337,56 +323,6 @@ def parse_llm_output(content: str, schema_class: type[BaseModel]) -> BaseModel |
             pass
 
     logger.warning("Failed to parse LLM output as %s", schema_class.__name__)
-    return None
-
-
-def _extract_json_block(text: str) -> str | None:
-    """Extract JSON from a markdown code block."""
-    markers = ["```json", "```"]
-    for marker in markers:
-        start = text.find(marker)
-        if start == -1:
-            continue
-        start += len(marker)
-        end = text.find("```", start)
-        if end == -1:
-            continue
-        block = text[start:end].strip()
-        if block.startswith("{") or block.startswith("["):
-            return block
-    return None
-
-
-def _find_json_object(text: str) -> str | None:
-    """Find a JSON object in text by matching braces."""
-    start = text.find("{")
-    if start == -1:
-        return None
-
-    depth = 0
-    in_string = False
-    escape = False
-
-    for i in range(start, len(text)):
-        c = text[i]
-        if escape:
-            escape = False
-            continue
-        if c == "\\":
-            escape = True
-            continue
-        if c == '"' and not escape:
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-
     return None
 
 

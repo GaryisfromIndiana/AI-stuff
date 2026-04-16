@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -61,7 +60,7 @@ class EditorResult:
             return "No claims were extracted for verification."
 
         lines = [
-            f"## Fact Verification Summary",
+            "## Fact Verification Summary",
             f"- **{self.total_claims}** claims extracted from output",
             f"- **{self.supported_count}** supported by independent verification",
             f"- **{self.contradicted_count}** contradicted by independent sources",
@@ -222,7 +221,7 @@ class Editor:
         task_title: str,
     ) -> list[VerifiedClaim]:
         """Use one LLM call to extract atomic claims from the output."""
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         # Build tool source summary so the LLM knows which tools produced what
@@ -413,9 +412,7 @@ Return ONLY the JSON array, no other text."""
             return {"repo_id": claim.entity_name} if claim.entity_name else {"query": query}
         elif "paper_search" in tool:
             return {"query": query, "limit": 3}
-        elif "tavily" in tool:
-            return {"query": query, "max_results": 3}
-        elif "web_search" in tool:
+        elif "tavily" in tool or "web_search" in tool:
             return {"query": query, "max_results": 3}
         else:
             return {"query": query}

@@ -6,7 +6,6 @@ import importlib
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 try:
     from ddgs import DDGS
@@ -230,9 +229,10 @@ class WebSearcher:
             on any error.
         """
         try:
-            from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
             import json
+
+            from llm.base import LLMMessage, LLMRequest
+            from llm.router import ModelRouter, TaskMetadata
 
             router = ModelRouter(self.empire_id)
 
@@ -469,8 +469,8 @@ class WebSearcher:
 
         # Step 2: Synthesize findings with LLM (for standard and deep)
         try:
+            from llm.base import LLMMessage, LLMRequest
             from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
 
             router = ModelRouter(self.empire_id)
             tier = "synthesis" if depth == "deep" else "analysis"

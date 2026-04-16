@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
-import hashlib
-from typing import Any
 
 
 def truncate(text: str, max_length: int = 500, suffix: str = "...") -> str:
@@ -26,13 +25,81 @@ def estimate_tokens(text: str, chars_per_token: int = 4) -> int:
 
 
 def extract_json_block(text: str) -> str | None:
-    """Extract JSON from a markdown code block or mixed LLM output.
+    """Extract a JSON string from a markdown code block or mixed LLM output.
 
-    Delegates to llm.schemas for robust extraction with brace matching.
+    Returns the raw JSON string if found, otherwise None. The caller is
+    responsible for parsing (use :func:`safe_json_loads` if you want a dict).
     """
-    from llm.schemas import safe_json_loads
-    result = safe_json_loads(text)
-    return json.dumps(result) if result else None
+    return _extract_json_block(text) or _find_json_object(text)
+
+
+def safe_json_loads(content: str, default: dict | None = None) -> dict:
+    """Parse JSON from LLM output with fallback extraction.
+
+    Tries direct parse, then markdown code block extraction, then brace matching.
+    Returns ``default`` (or ``{}``) if nothing can be parsed.
+    """
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    json_str = _extract_json_block(content) or _find_json_object(content)
+    if json_str:
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+    return default if default is not None else {}
+
+
+def _extract_json_block(text: str) -> str | None:
+    """Extract JSON from a markdown code block."""
+    markers = ["```json", "```"]
+    for marker in markers:
+        start = text.find(marker)
+        if start == -1:
+            continue
+        start += len(marker)
+        end = text.find("```", start)
+        if end == -1:
+            continue
+        block = text[start:end].strip()
+        if block.startswith("{") or block.startswith("["):
+            return block
+    return None
+
+
+def _find_json_object(text: str) -> str | None:
+    """Find a JSON object in text by matching braces."""
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+
+    for i in range(start, len(text)):
+        c = text[i]
+        if escape:
+            escape = False
+            continue
+        if c == "\\":
+            escape = True
+            continue
+        if c == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+
+    return None
 
 
 def normalize_whitespace(text: str) -> str:

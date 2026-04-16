@@ -49,6 +49,12 @@ def create_app(config: dict | None = None) -> Flask:
         from db.engine import init_db
         init_db()
 
+    # Wire the spend recorder so llm.router can record LLM cost without
+    # importing core/. See ARCHITECTURE.md § Documented exceptions.
+    from core.routing.budget import BudgetManager
+    from llm import register_spend_recorder_factory
+    register_spend_recorder_factory(BudgetManager)
+
     # Auto-close scoped sessions at end of each request to prevent leaks
     @app.teardown_appcontext
     def shutdown_session(exception=None):
@@ -60,20 +66,20 @@ def create_app(config: dict | None = None) -> Flask:
             pass
 
     # Register blueprints
-    from web.routes.dashboard import dashboard_bp
-    from web.routes.lieutenants import lieutenants_bp
-    from web.routes.directives import directives_bp
-    from web.routes.knowledge import knowledge_bp
-    from web.routes.warrooms import warrooms_bp
-    from web.routes.evolution import evolution_bp
-    from web.routes.settings import settings_bp
     from web.routes.api import api_bp
-    from web.routes.memory import memory_bp
-    from web.routes.scheduler import scheduler_bp
     from web.routes.budget import budget_bp
-    from web.routes.replication import replication_bp
+    from web.routes.dashboard import dashboard_bp
+    from web.routes.directives import directives_bp
+    from web.routes.evolution import evolution_bp
     from web.routes.god_panel import god_panel_bp
+    from web.routes.knowledge import knowledge_bp
+    from web.routes.lieutenants import lieutenants_bp
     from web.routes.mcp import mcp_bp
+    from web.routes.memory import memory_bp
+    from web.routes.replication import replication_bp
+    from web.routes.scheduler import scheduler_bp
+    from web.routes.settings import settings_bp
+    from web.routes.warrooms import warrooms_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(lieutenants_bp, url_prefix="/lieutenants")
@@ -112,11 +118,16 @@ def create_app(config: dict | None = None) -> Flask:
         return None
 
     # ── Authentication ──────────────────────────────────────────────
-    from web.middleware.auth import require_login, require_api_auth, _is_auth_enabled, _check_password, _get_auth_config
+    from web.middleware.auth import (
+        _check_password,
+        _get_auth_config,
+        _is_auth_enabled,
+    )
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
-        from flask import render_template, session as flask_session
+        from flask import render_template
+        from flask import session as flask_session
         if request.method == "POST":
             username = request.form.get("username", "")
             password = request.form.get("password", "")
@@ -201,7 +212,6 @@ def create_app(config: dict | None = None) -> Flask:
     # Start scheduler daemon in every worker. The advisory lock in tick()
     # ensures only one worker runs jobs per tick (on Postgres). On SQLite
     # it's fine — only one process runs anyway.
-    import os
     is_worker = os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG")
     if is_worker:
         try:

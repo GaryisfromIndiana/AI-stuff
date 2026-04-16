@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, func, and_, or_, desc, asc, text
+from sqlalchemy import and_, desc, func, or_, select
 
 from db.models import KnowledgeEntity, KnowledgeRelation
 from db.repositories.base import BaseRepository
@@ -145,7 +144,7 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
         Returns:
             Number of entities decayed.
         """
-        threshold = datetime.now(timezone.utc) - timedelta(days=days_old)
+        threshold = datetime.now(UTC) - timedelta(days=days_old)
         stmt = (
             select(KnowledgeEntity)
             .where(and_(

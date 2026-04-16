@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import logging
 import random
-from typing import Any, Generator, Optional
+from collections.abc import Generator
+from typing import Any
 
 import anthropic
 
 from llm.base import (
-    LLMClient, LLMRequest, LLMResponse, LLMMessage,
-    StreamChunk, ToolCall, ToolDefinition, estimate_tokens,
+    LLMClient,
+    LLMMessage,
+    LLMRequest,
+    LLMResponse,
+    StreamChunk,
+    ToolCall,
+    ToolDefinition,
+    estimate_tokens,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,7 +107,7 @@ class AnthropicClient(LLMClient):
             raw_response=raw,
         )
 
-    def _classify_error(self, error: Exception, attempt: int) -> Optional[float]:
+    def _classify_error(self, error: Exception, attempt: int) -> float | None:
         """Classify Anthropic errors for retry decisions."""
         if isinstance(error, anthropic.RateLimitError):
             base_wait = min(2 ** attempt * 5, 60)

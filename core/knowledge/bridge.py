@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -288,8 +288,8 @@ class KnowledgeBridge:
                     status="completed",
                     entities_synced=result.get("nodes_imported", 0),
                     relations_synced=result.get("edges_imported", 0),
-                    started_at=datetime.now(timezone.utc),
-                    completed_at=datetime.now(timezone.utc),
+                    started_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC),
                 )
                 session.add(sync)
         except Exception as e:

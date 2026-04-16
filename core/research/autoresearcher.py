@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -348,7 +348,7 @@ class AutoResearcher:
                     description=q.question,
                     task_type="research",
                     status="executing",
-                    started_at=datetime.now(timezone.utc),
+                    started_at=datetime.now(UTC),
                     pipeline_stage="executing",
                     input_json={
                         "question_id": q.question_id,
@@ -376,9 +376,9 @@ class AutoResearcher:
             return
         try:
             from db.engine import repo_scope
-            from db.repositories.task import TaskRepository
-            from db.repositories.lieutenant import LieutenantRepository
             from db.repositories.empire import EmpireRepository
+            from db.repositories.lieutenant import LieutenantRepository
+            from db.repositories.task import TaskRepository
 
             with repo_scope(TaskRepository) as repo:
                 repo.complete_task(
@@ -429,8 +429,8 @@ class AutoResearcher:
             return
         try:
             from db.engine import repo_scope
-            from db.repositories.task import TaskRepository
             from db.repositories.lieutenant import LieutenantRepository
+            from db.repositories.task import TaskRepository
 
             with repo_scope(TaskRepository) as repo:
                 task = repo.fail_task(task_id, error, increment_retry=False)
@@ -461,8 +461,8 @@ class AutoResearcher:
 
     def _search_phase(self, question: Any) -> list[ResearchFinding]:
         """Search the web using the question's search queries."""
-        from core.search.web import WebSearcher
         from core.research.questions import ResearchQuestion
+        from core.search.web import WebSearcher
 
         q: ResearchQuestion = question
         searcher = WebSearcher(self.empire_id)
@@ -554,8 +554,8 @@ class AutoResearcher:
         if not findings:
             return [], 0.0, 0, ""
 
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import ModelRouter, TaskMetadata
-        from llm.base import LLMRequest, LLMMessage
 
         context = "\n\n".join(
             f"### {f.title}\n{f.content[:800]}\n(Source: {f.source_name})"
@@ -615,6 +615,7 @@ Rules:
     def _parse_entities(self, raw: str) -> list[dict]:
         """Parse entity extraction JSON response."""
         import json
+
         from utils.text import extract_json_block
 
         text = extract_json_block(raw) if "```" in raw else raw
@@ -699,9 +700,9 @@ Rules:
 
         Returns (reports_created, total_cost_usd).
         """
-        from llm.router import ModelRouter, TaskMetadata
-        from llm.base import LLMRequest, LLMMessage
         from core.memory.manager import MemoryManager
+        from llm.base import LLMMessage, LLMRequest
+        from llm.router import ModelRouter, TaskMetadata
 
         router = ModelRouter(self.empire_id)
         mm = MemoryManager(self.empire_id)
@@ -760,7 +761,7 @@ Write in a professional intelligence-briefing style. Be specific — cite source
                 mm.store(
                     content=response.content,
                     memory_type="semantic",
-                    title=f"Research Synthesis: {domain} — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+                    title=f"Research Synthesis: {domain} — {datetime.now(UTC).strftime('%Y-%m-%d')}",
                     category="synthesis",
                     importance=0.85,
                     tags=["synthesis", "auto_research", domain],

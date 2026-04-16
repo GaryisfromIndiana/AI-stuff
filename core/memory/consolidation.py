@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -235,11 +235,13 @@ class MemoryConsolidator:
 
         with repo_scope(MemoryRepository) as repo:
             # Get old episodic memories
-            from datetime import datetime, timezone, timedelta
-            from sqlalchemy import select, and_
+            from datetime import datetime, timedelta
+
+            from sqlalchemy import and_, select
+
             from db.models import MemoryEntry
 
-            threshold = datetime.now(timezone.utc) - timedelta(days=days)
+            threshold = datetime.now(UTC) - timedelta(days=days)
             stmt = (
                 select(MemoryEntry)
                 .where(and_(

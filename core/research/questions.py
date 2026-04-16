@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -106,9 +106,9 @@ class ResearchQuestionGenerator:
         lieutenant_id: str,
     ) -> list[ResearchQuestion]:
         """Use LLM to generate research questions for a specific gap."""
-        from llm.router import ModelRouter, TaskMetadata
-        from llm.base import LLMRequest, LLMMessage
         from core.research.strategy import StrategyTracker
+        from llm.base import LLMMessage, LLMRequest
+        from llm.router import ModelRouter, TaskMetadata
 
         tracker = StrategyTracker(self.empire_id)
         strategy = tracker.pick_strategy(domain)
@@ -227,7 +227,7 @@ Rules:
         from utils.crypto import generate_id
 
         questions: list[ResearchQuestion] = []
-        now_year = datetime.now(timezone.utc).year
+        now_year = datetime.now(UTC).year
 
         for domain, gaps in gaps_by_domain.items():
             lt_id = lt_map.get(domain, "")

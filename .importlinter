@@ -1,0 +1,87 @@
+[importlinter]
+root_packages =
+    core
+    db
+    web
+    llm
+    cli
+    utils
+    config
+
+# Enforce the layered architecture documented in ARCHITECTURE.md.
+# Higher layers may import from lower layers. Reverse imports fail.
+#
+# Siblings on the same layer (e.g. web | cli) may NOT import from each other
+# by default; legitimate exceptions are listed under `ignore_imports`.
+[importlinter:contract:layered]
+name = Empire layered architecture
+type = layers
+layers =
+    web | cli
+    core
+    llm
+    db
+    utils
+    config
+ignore_imports =
+    # ─── Legitimate exceptions ──────────────────────────────────────
+    # Lieutenant manager scopes its own transactions. ARCHITECTURE.md § Documented exceptions.
+    core.lieutenant.manager -> db.engine
+    # `cli serve` launches the web server — sibling edges of the same system.
+    cli.commands -> web.app
+
+
+# core and llm never depend on the edge.
+[importlinter:contract:no-upward-from-core]
+name = core never imports web or cli
+type = forbidden
+source_modules =
+    core
+forbidden_modules =
+    web
+    cli
+
+[importlinter:contract:no-upward-from-llm]
+name = llm never imports web or cli
+type = forbidden
+source_modules =
+    llm
+forbidden_modules =
+    web
+    cli
+
+# config is the absolute leaf — imports nothing from the project.
+[importlinter:contract:config-is-leaf]
+name = config is a leaf
+type = forbidden
+source_modules =
+    config
+forbidden_modules =
+    core
+    db
+    web
+    llm
+    cli
+    utils
+
+# utils may import config only; nothing else from the project.
+[importlinter:contract:utils-near-leaf]
+name = utils depends only on config
+type = forbidden
+source_modules =
+    utils
+forbidden_modules =
+    core
+    db
+    web
+    cli
+
+# db never reaches up to the edge.
+[importlinter:contract:db-no-edge]
+name = db never imports web or cli
+type = forbidden
+source_modules =
+    db
+forbidden_modules =
+    web
+    cli

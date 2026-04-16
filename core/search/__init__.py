@@ -1,17 +1,26 @@
 """Search module — web search, scraping, RSS, credibility, caching, intelligence sweep."""
 
-from core.search.web import WebSearcher, SearchResult, WebSearchResponse
-from core.search.scraper import WebScraper, ScrapedPage
-from core.search.credibility import CredibilityScorer, CredibilityScore
-from core.search.feeds import FeedReader, FeedEntry, FeedResult
-from core.search.cache import ScrapeCache, ResearchDeduplicator
-from core.search.sweep import IntelligenceSweep, SweepResult, Discovery
+from core.search.cache import ResearchDeduplicator, ScrapeCache
+from core.search.credibility import CredibilityScore, CredibilityScorer
+from core.search.feeds import FeedEntry, FeedReader, FeedResult
+from core.search.scraper import ScrapedPage, WebScraper
+from core.search.sweep import Discovery, IntelligenceSweep, SweepResult
+from core.search.web import SearchResult, WebSearcher, WebSearchResponse
 
 __all__ = [
-    "WebSearcher", "SearchResult", "WebSearchResponse",
-    "WebScraper", "ScrapedPage",
-    "CredibilityScorer", "CredibilityScore",
-    "FeedReader", "FeedEntry", "FeedResult",
-    "ScrapeCache", "ResearchDeduplicator",
-    "IntelligenceSweep", "SweepResult", "Discovery",
+    "CredibilityScore",
+    "CredibilityScorer",
+    "Discovery",
+    "FeedEntry",
+    "FeedReader",
+    "FeedResult",
+    "IntelligenceSweep",
+    "ResearchDeduplicator",
+    "ScrapeCache",
+    "ScrapedPage",
+    "SearchResult",
+    "SweepResult",
+    "WebScraper",
+    "WebSearchResponse",
+    "WebSearcher",
 ]

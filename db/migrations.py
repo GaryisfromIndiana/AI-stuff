@@ -8,14 +8,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
+from datetime import UTC, datetime
 
-from sqlalchemy import text, inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
-from db.engine import get_engine, session_scope
+from db.engine import get_engine
 from db.models import Base
 
 logger = logging.getLogger(__name__)
@@ -31,7 +29,7 @@ class MigrationVersion:
         description: str = "",
         sql_up: str = "",
         sql_down: str = "",
-        applied_at: Optional[datetime] = None,
+        applied_at: datetime | None = None,
     ):
         self.version = version
         self.name = name
@@ -317,7 +315,7 @@ class MigrationRunner:
             })
             conn.commit()
 
-        migration.applied_at = datetime.now(timezone.utc)
+        migration.applied_at = datetime.now(UTC)
 
     def rollback(self, target_version: int = 0) -> list[MigrationVersion]:
         """Rollback migrations down to target version.

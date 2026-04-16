@@ -5,12 +5,11 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC
 
-from core.ace.engine import ACEEngine, ACEContext, TaskInput, TaskResult
-from core.memory.manager import MemoryManager
+from core.ace.engine import ACEContext, ACEEngine, TaskInput, TaskResult
 from core.lieutenant.persona import PersonaConfig
+from core.memory.manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -138,9 +137,10 @@ class Lieutenant:
 
         # Update lieutenant DB record (performance, cost, last_active)
         try:
+            from datetime import datetime
+
             from db.engine import session_scope
             from db.models import Lieutenant as LtModel
-            from datetime import datetime, timezone as tz
 
             with session_scope() as session:
                 db_lt = session.get(LtModel, self.id)
@@ -150,7 +150,7 @@ class Lieutenant:
                     else:
                         db_lt.tasks_failed += 1
                     db_lt.total_cost_usd += result.cost_usd
-                    db_lt.last_active_at = datetime.now(tz.utc)
+                    db_lt.last_active_at = datetime.now(UTC)
 
                     # Rolling average quality
                     total = db_lt.tasks_completed + db_lt.tasks_failed

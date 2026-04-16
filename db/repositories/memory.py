@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-import math
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, func, and_, or_, desc, asc, delete
+from sqlalchemy import and_, delete, desc, func, or_, select
 
 from db.models import MemoryEntry
 from db.repositories.base import BaseRepository
@@ -98,7 +97,7 @@ class MemoryRepository(BaseRepository[MemoryEntry]):
         limit: int = 50,
     ) -> list[MemoryEntry]:
         """Get recently created memories."""
-        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        since = datetime.now(UTC) - timedelta(hours=hours)
         stmt = (
             select(MemoryEntry)
             .where(and_(
@@ -213,7 +212,7 @@ class MemoryRepository(BaseRepository[MemoryEntry]):
 
     def cleanup_expired(self, empire_id: str) -> int:
         """Remove expired memories."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = (
             delete(MemoryEntry)
             .where(and_(
@@ -248,7 +247,7 @@ class MemoryRepository(BaseRepository[MemoryEntry]):
 
     def cleanup_old_episodic(self, empire_id: str, days: int = 30) -> int:
         """Remove old episodic memories (they should be promoted or discarded)."""
-        threshold = datetime.now(timezone.utc) - timedelta(days=days)
+        threshold = datetime.now(UTC) - timedelta(days=days)
         stmt = (
             delete(MemoryEntry)
             .where(and_(
@@ -339,102 +338,10 @@ class MemoryRepository(BaseRepository[MemoryEntry]):
 
         return stats
 
-    def similarity_search(
-        self,
-        embedding: list[float],
-        empire_id: str,
-        lieutenant_id: str | None = None,
-        memory_types: list[str] | None = None,
-        limit: int = 10,
-        min_similarity: float = 0.5,
-    ) -> list[dict]:
-        """Find memories similar to a given embedding.
-
-        Uses Qdrant when available for sub-millisecond ANN search,
-        falls back to in-memory cosine similarity over SQL rows.
-        """
-        # ── Try Qdrant first ──────────────────────────────────────
-        try:
-            from core.vector.store import VectorStore
-            vs = VectorStore.get_instance(empire_id)
-            if vs.enabled:
-                hits = vs.search_memories(
-                    embedding=embedding,
-                    empire_id=empire_id,
-                    lieutenant_id=lieutenant_id,
-                    memory_types=memory_types,
-                    limit=limit,
-                    min_score=min_similarity,
-                )
-                if hits:
-                    # Fetch full MemoryEntry objects by ID
-                    memory_ids = [h["memory_id"] for h in hits]
-                    score_map = {h["memory_id"]: h["score"] for h in hits}
-                    entries = list(self.session.execute(
-                        select(MemoryEntry).where(MemoryEntry.id.in_(memory_ids))
-                    ).scalars().all())
-                    entry_map = {e.id: e for e in entries}
-                    results = []
-                    for mid in memory_ids:
-                        entry = entry_map.get(mid)
-                        if entry:
-                            results.append({"memory": entry, "similarity": score_map[mid]})
-                    if results:
-                        return results
-                    # Qdrant returned hits but none matched DB IDs — stale index.
-                    # Fall through to ILIKE search below.
-                    logger.warning(
-                        "Qdrant returned %d hits but 0 matched DB records — index is stale, falling back to text search",
-                        len(hits),
-                    )
-        except Exception as e:
-            logger.debug("Qdrant memory search unavailable, falling back to SQL: %s", e)
-
-        # ── Fallback: in-memory cosine similarity ─────────────────
-        # Cap loaded rows to avoid loading the entire embedding table into
-        # memory every time Qdrant is stale — 500 × 25KB = 12MB max.
-        # Order by effective_importance so the best candidates are kept.
-        # embedding_json is deferred at the ORM level, so we must undefer here.
-        from sqlalchemy.orm import undefer
-        stmt = (
-            select(MemoryEntry)
-            .options(undefer(MemoryEntry.embedding_json))
-            .where(and_(
-                MemoryEntry.empire_id == empire_id,
-                MemoryEntry.embedding_json.is_not(None),
-            ))
-            .order_by(MemoryEntry.effective_importance.desc())
-            .limit(500)
-        )
-        if lieutenant_id:
-            stmt = stmt.where(MemoryEntry.lieutenant_id == lieutenant_id)
-        if memory_types:
-            stmt = stmt.where(MemoryEntry.memory_type.in_(memory_types))
-
-        memories = list(self.session.execute(stmt).scalars().all())
-
-        results = []
-        for memory in memories:
-            if not memory.embedding_json:
-                continue
-            sim = self._cosine_similarity(embedding, memory.embedding_json)
-            if sim >= min_similarity:
-                results.append({"memory": memory, "similarity": sim})
-
-        results.sort(key=lambda x: x["similarity"], reverse=True)
-        return results[:limit]
-
-    @staticmethod
-    def _cosine_similarity(a: list[float], b: list[float]) -> float:
-        """Compute cosine similarity between two vectors."""
-        if len(a) != len(b) or not a:
-            return 0.0
-        dot = sum(x * y for x, y in zip(a, b))
-        norm_a = math.sqrt(sum(x * x for x in a))
-        norm_b = math.sqrt(sum(x * x for x in b))
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        return dot / (norm_a * norm_b)
+    # Note: memory vector similarity search is performed by
+    # ``core.memory.manager`` directly against ``core.vector.store``.
+    # We deliberately do not mirror that path here — the repository is
+    # persistence-only and never imports from core.
 
     def get_for_context(
         self,

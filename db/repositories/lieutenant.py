@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import select, func, and_, desc, case
+from sqlalchemy import and_, desc, func, select
 
-from db.models import Lieutenant, Task, MemoryEntry, BudgetLog
+from db.models import BudgetLog, Lieutenant, Task
 from db.repositories.base import BaseRepository
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ class LieutenantRepository(BaseRepository[Lieutenant]):
         Returns:
             List of idle lieutenants.
         """
-        threshold = datetime.now(timezone.utc) - timedelta(minutes=idle_minutes)
+        threshold = datetime.now(UTC) - timedelta(minutes=idle_minutes)
         stmt = (
             select(Lieutenant)
             .where(and_(
@@ -183,7 +183,7 @@ class LieutenantRepository(BaseRepository[Lieutenant]):
         quality_factor = lt.avg_quality_score if lt.avg_quality_score > 0 else 0.5
         lt.performance_score = min(1.0, (success_rate * 0.4 + quality_factor * 0.6))
 
-        lt.last_active_at = datetime.now(timezone.utc)
+        lt.last_active_at = datetime.now(UTC)
         self.session.flush()
         return lt
 
@@ -245,7 +245,7 @@ class LieutenantRepository(BaseRepository[Lieutenant]):
         Returns:
             Dict with cost by model, by purpose, daily totals.
         """
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         # By model
         stmt_model = (
@@ -331,7 +331,7 @@ class LieutenantRepository(BaseRepository[Lieutenant]):
         Returns:
             Lieutenants due for learning.
         """
-        threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
+        threshold = datetime.now(UTC) - timedelta(hours=hours)
         stmt = (
             select(Lieutenant)
             .where(and_(
@@ -348,7 +348,7 @@ class LieutenantRepository(BaseRepository[Lieutenant]):
         self.update(
             lieutenant_id,
             current_task_id=task_id,
-            last_active_at=datetime.now(timezone.utc),
+            last_active_at=datetime.now(UTC),
         )
 
     def get_fleet_summary(self, empire_id: str) -> dict:

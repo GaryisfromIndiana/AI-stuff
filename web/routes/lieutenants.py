@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, render_template, jsonify, request, current_app
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ def lieutenant_research(lieutenant_id: str):
 @lieutenants_bp.route("/templates")
 def persona_templates():
     """Get available persona templates."""
-    from core.lieutenant.persona import list_persona_templates, PERSONA_TEMPLATES
+    from core.lieutenant.persona import PERSONA_TEMPLATES, list_persona_templates
     templates = []
     for name in list_persona_templates():
         t = PERSONA_TEMPLATES[name]

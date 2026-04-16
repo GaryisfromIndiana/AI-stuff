@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._success_count = 0
-        self._last_failure_time: Optional[float] = None
+        self._last_failure_time: float | None = None
         self._half_open_calls = 0
 
     @property
@@ -140,7 +140,7 @@ class CircuitBreaker:
 class CircuitBreakerRegistry:
     """Singleton registry for all circuit breakers."""
 
-    _instance: Optional[CircuitBreakerRegistry] = None
+    _instance: CircuitBreakerRegistry | None = None
 
     def __init__(self) -> None:
         self._breakers: dict[str, CircuitBreaker] = {}

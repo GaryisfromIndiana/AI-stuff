@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class GroundTruthValidator:
 
         mm = MemoryManager(self.empire_id)
         report = ValidationReport(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             total_facts=len(facts),
         )
 

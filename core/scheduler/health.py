@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ class HealthCheckResult:
 
     def __post_init__(self):
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -37,7 +36,7 @@ class HealthReport:
 
     def __post_init__(self):
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -114,7 +113,7 @@ class HealthChecker:
         """Check database connectivity and health."""
         start = time.time()
         try:
-            from db.engine import check_connection, get_db_stats
+            from db.engine import check_connection
             healthy = check_connection()
             response_time = (time.time() - start) * 1000
 

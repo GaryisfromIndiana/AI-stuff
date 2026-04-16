@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +91,7 @@ class WorkloadBalancer:
                     filters={"lieutenant_id": lt.id, "status": ["completed", "failed", "executing"]},
                     limit=100,
                 )
-                tasks_today = len([t for t in today_tasks if t.created_at and t.created_at.date() == datetime.now(timezone.utc).date()])
+                tasks_today = len([t for t in today_tasks if t.created_at and t.created_at.date() == datetime.now(UTC).date()])
 
                 # Calculate load score
                 has_current = lt.current_task_id is not None
@@ -194,7 +193,7 @@ class WorkloadBalancer:
                 reasons.append(f"domain match ({state.domain})")
             elif state.domain and state.domain.lower() in desc_lower:
                 score += 0.2
-                reasons.append(f"domain keyword match")
+                reasons.append("domain keyword match")
 
             # Performance
             score += state.performance_score * 0.25

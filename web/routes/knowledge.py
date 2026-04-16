@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from flask import Blueprint, render_template, jsonify, request, current_app
+
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 logger = logging.getLogger(__name__)
 knowledge_bp = Blueprint("knowledge", __name__)

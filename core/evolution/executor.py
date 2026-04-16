@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +105,7 @@ class EvolutionExecutor:
             self._applied[result.proposal_id] = {
                 "proposal": proposal,
                 "changes": result.changes_applied,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
             # Record in DB

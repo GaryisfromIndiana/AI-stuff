@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, func, and_, desc, asc
+from sqlalchemy import and_, asc, func, select
 
 from db.models import Task
 from db.repositories.base import BaseRepository
@@ -78,7 +78,7 @@ class TaskRepository(BaseRepository[Task]):
         """Mark task as started."""
         updates: dict[str, Any] = {
             "status": "executing",
-            "started_at": datetime.now(timezone.utc),
+            "started_at": datetime.now(UTC),
             "pipeline_stage": "executing",
         }
         if model:
@@ -96,7 +96,7 @@ class TaskRepository(BaseRepository[Task]):
         model_used: str | None = None,
     ) -> Task | None:
         """Mark task as completed with results."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         task = self.get(task_id)
         if task is None:
             return None
@@ -105,7 +105,7 @@ class TaskRepository(BaseRepository[Task]):
         if task.started_at:
             started = task.started_at
             if started.tzinfo is None:
-                started = started.replace(tzinfo=timezone.utc)
+                started = started.replace(tzinfo=UTC)
             execution_time = (now - started).total_seconds()
 
         updates: dict[str, Any] = {
@@ -137,14 +137,14 @@ class TaskRepository(BaseRepository[Task]):
             "attempt": task.retry_count + 1,
             "error": error,
             "model": task.model_used,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
         updates: dict[str, Any] = {
             "status": "failed",
             "last_error": error,
             "error_log_json": error_log,
-            "completed_at": datetime.now(timezone.utc),
+            "completed_at": datetime.now(UTC),
         }
         if increment_retry:
             updates["retry_count"] = task.retry_count + 1
@@ -156,7 +156,7 @@ class TaskRepository(BaseRepository[Task]):
         return self.update(
             task_id,
             status="retrying",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             completed_at=None,
         )
 
@@ -166,7 +166,7 @@ class TaskRepository(BaseRepository[Task]):
         days: int = 30,
     ) -> dict:
         """Get aggregated cost data."""
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         stmt = (
             select(
@@ -216,7 +216,7 @@ class TaskRepository(BaseRepository[Task]):
         days: int = 7,
     ) -> dict:
         """Get task performance statistics."""
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         stmt = select(Task).where(Task.created_at >= since)
         if lieutenant_id:
@@ -299,10 +299,10 @@ class TaskRepository(BaseRepository[Task]):
         Returns:
             Number of tasks marked as failed.
         """
-        threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
+        threshold = datetime.now(UTC) - timedelta(hours=hours)
         return self.update_where(
             filters={"status": "executing"},
             status="failed",
             last_error="Task timed out (stale execution)",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         )

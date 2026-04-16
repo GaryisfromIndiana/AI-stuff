@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
-import signal
-import time
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any, Callable, Optional
+from datetime import UTC, datetime, timedelta
 
-from core.errors import TransientError, ConfigError, FatalError
+from core.errors import ConfigError, FatalError, TransientError
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,7 @@ class JobConfig:
     enabled: bool = True
     priority: int = 5  # 1 = highest
     description: str = ""
-    last_run: Optional[datetime] = None
+    last_run: datetime | None = None
     run_count: int = 0
     error_count: int = 0
     consecutive_errors: int = 0
@@ -73,8 +72,8 @@ class SchedulerDaemon:
         self.tick_interval = tick_interval
         self._jobs: dict[str, JobConfig] = {}
         self._running = False
-        self._thread: Optional[threading.Thread] = None
-        self._start_time: Optional[float] = None
+        self._thread: threading.Thread | None = None
+        self._start_time: float | None = None
         self._tick_count = 0
         self._total_job_runs = 0
         self._total_errors = 0
@@ -165,9 +164,10 @@ class SchedulerDaemon:
         """
         synced = 0
         try:
+            from sqlalchemy import select
+
             from db.engine import session_scope
             from db.models import SchedulerJob
-            from sqlalchemy import select, and_
 
             with session_scope() as session:
                 stmt = select(SchedulerJob).where(SchedulerJob.empire_id == self.empire_id)
@@ -181,7 +181,7 @@ class SchedulerDaemon:
                             # math with datetime.now(timezone.utc) works.
                             last_run = db_job.last_run_at
                             if last_run.tzinfo is None:
-                                last_run = last_run.replace(tzinfo=timezone.utc)
+                                last_run = last_run.replace(tzinfo=UTC)
                             job.last_run = last_run
                             job.run_count = db_job.run_count or 0
                             job.error_count = db_job.error_count or 0
@@ -202,10 +202,11 @@ class SchedulerDaemon:
         Per-row savepoints so one IntegrityError (race with another worker)
         doesn't roll back the entire batch.
         """
-        from db.engine import session_scope
-        from db.models import SchedulerJob
         from sqlalchemy import select
         from sqlalchemy.exc import IntegrityError
+
+        from db.engine import session_scope
+        from db.models import SchedulerJob
 
         with self._lock:
             snapshot = list(self._jobs.values())
@@ -296,7 +297,7 @@ class SchedulerDaemon:
         # exactly how you get an OOM death spiral across every restart.
         # Push high-priority (expensive) jobs forward by their interval so
         # the new worker warms up before touching them.
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         immediate_jobs = {"health_check", "budget_check", "directive_check"}
         with self._lock:
             for job in self._jobs.values():
@@ -304,9 +305,7 @@ class SchedulerDaemon:
                     continue
                 # If last_run is stale (>interval ago) OR None, defer it to
                 # now so tick 0 doesn't fire every overdue job simultaneously.
-                if job.last_run is None:
-                    job.last_run = now
-                elif (now - job.last_run).total_seconds() >= job.interval_seconds:
+                if job.last_run is None or (now - job.last_run).total_seconds() >= job.interval_seconds:
                     job.last_run = now
 
         # Persist job registry IMMEDIATELY, before any tick runs.  Previously
@@ -355,8 +354,9 @@ class SchedulerDaemon:
         giving zero mutual exclusion during the actual tick work.
         """
         try:
-            from db.engine import get_engine
             from sqlalchemy import text
+
+            from db.engine import get_engine
             engine = get_engine()
             if "postgresql" not in str(engine.url):
                 return None, True
@@ -410,7 +410,7 @@ class SchedulerDaemon:
 
         with self._lock:
             self._tick_count += 1
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         executed = []
 
         # Sort jobs by priority
@@ -527,7 +527,7 @@ class SchedulerDaemon:
             result = job.handler()
             duration = time.time() - start
             with self._lock:
-                job.last_run = datetime.now(timezone.utc)
+                job.last_run = datetime.now(UTC)
                 job.run_count += 1
             return {"job": job_name, "duration_seconds": duration, "result": result}
         except Exception as e:
@@ -561,7 +561,7 @@ class SchedulerDaemon:
             uptime_seconds=uptime,
             jobs_registered=len(self._jobs),
             jobs_active=active_jobs,
-            last_tick=datetime.now(timezone.utc).isoformat(),
+            last_tick=datetime.now(UTC).isoformat(),
             total_ticks=self._tick_count,
             total_job_runs=self._total_job_runs,
             errors=self._total_errors,
@@ -570,7 +570,7 @@ class SchedulerDaemon:
     def get_next_runs(self) -> list[ScheduledRun]:
         """Get upcoming scheduled runs."""
         runs = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         with self._lock:
             for job in self._jobs.values():
@@ -629,10 +629,12 @@ class SchedulerDaemon:
             # We use a tighter window (0.5h) than the default (24h) because
             # research tasks should complete in minutes, not hours.
             from datetime import timedelta
+
             from sqlalchemy import and_, update
+
             from db.models import Task
 
-            threshold = datetime.now(timezone.utc) - timedelta(minutes=30)
+            threshold = datetime.now(UTC) - timedelta(minutes=30)
             stmt = (
                 update(Task)
                 .where(and_(
@@ -642,7 +644,7 @@ class SchedulerDaemon:
                 .values(
                     status="failed",
                     last_error="Stuck in executing > 30 min — auto-cleaned by scheduler",
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
             )
             result = repo.session.execute(stmt)

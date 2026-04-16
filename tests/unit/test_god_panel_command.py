@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from db.models import GodPanelCommand
 
 
 def test_to_dict_contains_all_fields():
     """to_dict() should include all command fields."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cmd = GodPanelCommand(
         id="abc123",
         empire_id="emp-1",

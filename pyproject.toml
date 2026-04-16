@@ -22,7 +22,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "import-linter>=2.0",
+    "pre-commit>=3.7",
+    "types-requests",
+    "types-redis",
+]
 
 [project.scripts]
 empire = "web.app:main"
@@ -35,3 +44,102 @@ include = ["config*", "db*", "llm*", "core*", "web*", "cli*", "utils*"]
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+# ────────────────────────────────────────────────────────────────────
+# Ruff — lint + format + import sort
+# ────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = [
+    ".venv",
+    ".claude",
+    "data",
+    "temp_vision_images",
+    "empire.egg-info",
+]
+
+[tool.ruff.lint]
+# Baseline: imports (I), pyupgrade (UP), pycodestyle errors (E), ruff rules (RUF).
+# Deliberately scoped narrowly for the initial rollout so the enforcement pass can
+# land without 500+ pre-existing violations blocking it.
+#
+# Tighten incrementally by adding rules:
+#   - F  = pyflakes (unused imports/vars, undefined names) — several pre-existing issues to fix first
+#   - B  = bugbear
+#   - SIM = simplify
+#   - TID = tidy-imports (deep-import bans — see commented banned-api below)
+select = ["E", "I", "UP", "RUF"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "E741",   # ambiguous variable names (pre-existing `l` etc — fix later)
+    "E402",   # module level import not at top (pre-existing)
+    "UP007",  # `Optional[X]` -> `X | None` (noisy; some typing contexts prefer the old form)
+    "UP042",  # StrEnum migration — do as a focused PR later
+    "UP046",  # PEP 695 generic syntax — do as a focused PR later
+    "RUF005", # list concat / spread — stylistic
+    "RUF012", # mutable class defaults — investigate case-by-case later
+    "RUF002", # ambiguous unicode in docstrings
+    "RUF003", # ambiguous unicode in comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["UP"]
+"scripts/**" = ["UP"]
+
+# Future: turn this on once existing deep imports are cleaned up.
+# [tool.ruff.lint.flake8-tidy-imports.banned-api]
+# "core.ace.engine".msg = "Import from `core.ace` instead."
+# "core.memory.manager".msg = "Import from `core.memory` instead."
+# "llm.schemas".msg = "Import from `llm` instead."
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ────────────────────────────────────────────────────────────────────
+# Mypy — typed contracts, strict on clean islands first
+# ────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+# Baseline: catch the easy wins without demanding full strictness yet.
+# Tighten per-module via `[[tool.mypy.overrides]]` as modules are cleaned up.
+strict = false
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+follow_imports = "silent"
+plugins = ["pydantic.mypy"]
+exclude = [
+    "^\\.venv/",
+    "^\\.claude/",
+    "^data/",
+    "^tests/",
+    "^scripts/",
+    "^diagnostic\\.py$",
+    "^seed\\.py$",
+    "^test_.*\\.py$",
+]
+
+# Third-party libraries without type stubs
+[[tool.mypy.overrides]]
+module = [
+    "anthropic.*",
+    "qdrant_client.*",
+    "tavily.*",
+    "ddgs.*",
+    "trafilatura.*",
+    "feedparser.*",
+    "apscheduler.*",
+    "psycopg2.*",
+    "markdown.*",
+    "flask.*",
+    "flask_limiter.*",
+]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true

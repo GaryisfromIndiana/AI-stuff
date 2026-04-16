@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -237,7 +235,7 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: str = "INFO"
     base_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parent.parent)
-    data_dir: Optional[Path] = None
+    data_dir: Path | None = None
 
     # ── Database ───────────────────────────────────────────────────────
     db_url: str = "sqlite:///empire.db"
@@ -279,7 +277,7 @@ class Settings(BaseSettings):
 
     @field_validator("data_dir", mode="before")
     @classmethod
-    def set_data_dir(cls, v: Optional[Path], info) -> Path:
+    def set_data_dir(cls, v: Path | None, info) -> Path:
         if v is not None:
             return Path(v)
         base = info.data.get("base_dir", Path(__file__).resolve().parent.parent)

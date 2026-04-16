@@ -1,17 +1,27 @@
 """Lieutenant system — specialized AI agents powered by ACE."""
 
-from core.lieutenant.base import Lieutenant, PerformanceStats, DebateContribution
-from core.lieutenant.manager import LieutenantManager, FleetStats
+from core.lieutenant.base import DebateContribution, Lieutenant, PerformanceStats
+from core.lieutenant.manager import FleetStats, LieutenantManager
 from core.lieutenant.persona import (
-    PersonaConfig, PersonaBuilder, create_persona,
-    list_persona_templates, PERSONA_TEMPLATES,
+    PERSONA_TEMPLATES,
+    PersonaBuilder,
+    PersonaConfig,
+    create_persona,
+    list_persona_templates,
 )
 from core.lieutenant.registry import LieutenantRegistry, RegistryEntry
 
 __all__ = [
-    "Lieutenant", "PerformanceStats", "DebateContribution",
-    "LieutenantManager", "FleetStats",
-    "PersonaConfig", "PersonaBuilder", "create_persona",
-    "list_persona_templates", "PERSONA_TEMPLATES",
-    "LieutenantRegistry", "RegistryEntry",
+    "PERSONA_TEMPLATES",
+    "DebateContribution",
+    "FleetStats",
+    "Lieutenant",
+    "LieutenantManager",
+    "LieutenantRegistry",
+    "PerformanceStats",
+    "PersonaBuilder",
+    "PersonaConfig",
+    "RegistryEntry",
+    "create_persona",
+    "list_persona_templates",
 ]

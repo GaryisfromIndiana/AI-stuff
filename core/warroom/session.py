@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ class Message:
 
     def __post_init__(self):
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -168,10 +167,10 @@ class WarRoomSession:
         self._add_message("system", "War Room", f"Planning phase: {directive_title}", "system")
 
         plans = []
-        from llm.base import LLMRequest, LLMMessage
-        from llm.router import ModelRouter, TaskMetadata
         from db.engine import get_session
         from db.repositories.lieutenant import LieutenantRepository
+        from llm.base import LLMMessage, LLMRequest
+        from llm.router import ModelRouter, TaskMetadata
 
         router = ModelRouter(self.empire_id)
         session_db = None
@@ -251,9 +250,8 @@ class WarRoomSession:
         """
         self.state = SessionState.RETROSPECTIVE
 
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import ModelRouter, TaskMetadata
-        import json
 
         router = ModelRouter(self.empire_id)
         results_str = json.dumps(results, indent=2, default=str)[:6000]
@@ -364,9 +362,8 @@ Respond as JSON:
 
     def _synthesize_debate(self, topic: str, contributions: list[dict]) -> dict:
         """Synthesize debate contributions using the Chief of Staff model."""
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import ModelRouter, TaskMetadata
-        import json
 
         router = ModelRouter(self.empire_id)
         contrib_text = "\n\n".join(
@@ -420,9 +417,8 @@ Respond as JSON:
 
     def _synthesize_plans(self, directive_title: str, plans: list[dict]) -> dict:
         """Synthesize individual plans into a unified plan."""
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import ModelRouter, TaskMetadata
-        import json
 
         router = ModelRouter(self.empire_id)
         plans_text = "\n\n---\n\n".join(
@@ -512,7 +508,7 @@ Respond as JSON:
                     action_items_json=action_items,
                     transcript_json=transcript,
                     total_cost_usd=self._total_cost,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
                 session.add(war_room)
 
@@ -534,11 +530,11 @@ def run_autonomous_debate(empire_id: str) -> dict:
     Called by the scheduler's autonomous_warroom job and the God Panel's
     auto-detect warroom trigger.
     """
-    from core.memory.manager import MemoryManager
     from core.memory.bitemporal import BiTemporalMemory
+    from core.memory.manager import MemoryManager
     from db.engine import get_session
-    from db.repositories.lieutenant import LieutenantRepository
     from db.models import _generate_id
+    from db.repositories.lieutenant import LieutenantRepository
 
     mm = MemoryManager(empire_id)
 
@@ -551,8 +547,8 @@ def run_autonomous_debate(empire_id: str) -> dict:
     recent_block = "\n".join(f"- {t}" for t in recent_titles)
 
     # 2. Ask LLM to pick a debate-worthy topic
+    from llm.base import LLMMessage, LLMRequest
     from llm.router import ModelRouter, TaskMetadata
-    from llm.base import LLMRequest, LLMMessage
 
     router = ModelRouter(empire_id)
 

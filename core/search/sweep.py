@@ -15,8 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +84,7 @@ class IntelligenceSweep:
                 result.total_found += len(discoveries)
 
                 for disc in discoveries:
-                    disc.discovered_at = datetime.now(timezone.utc).isoformat()
+                    disc.discovered_at = datetime.now(UTC).isoformat()
 
                     # Novelty check
                     disc.is_novel = self._is_novel(disc)

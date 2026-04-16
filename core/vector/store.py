@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import threading
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class VectorStore:
 
     def __init__(self, empire_id: str = ""):
         self._empire_id = empire_id
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._enabled = False
         self._initialized = False
         self._lock = threading.Lock()

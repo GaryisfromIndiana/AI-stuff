@@ -6,11 +6,12 @@ All database tables are defined here using SQLAlchemy 2.0 Mapped Column style.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -18,10 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    JSON,
     UniqueConstraint,
-    CheckConstraint,
-    func,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -32,7 +30,7 @@ from sqlalchemy.orm import (
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _generate_id() -> str:
@@ -58,8 +56,8 @@ class Empire(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     domain: Mapped[str] = mapped_column(String(64), default="general")
     status: Mapped[str] = mapped_column(String(32), default="active")  # active, paused, archived
-    config_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    config_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     total_tasks_completed: Mapped[int] = mapped_column(Integer, default=0)
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
@@ -106,9 +104,9 @@ class Lieutenant(Base):
     status: Mapped[str] = mapped_column(String(32), default="active")  # active, inactive, suspended, retired
 
     # Persona configuration
-    persona_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    specializations_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
-    preferred_models_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    persona_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    specializations_json: Mapped[list | None] = mapped_column(JSON, default=list)
+    preferred_models_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # Performance metrics
     performance_score: Mapped[float] = mapped_column(Float, default=0.5)
@@ -120,10 +118,10 @@ class Lieutenant(Base):
     knowledge_entries: Mapped[int] = mapped_column(Integer, default=0)
 
     # Activity tracking
-    current_task_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    last_active_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_learning_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_evolution_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_task_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_learning_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_evolution_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
@@ -172,26 +170,26 @@ class Directive(Base):
     source: Mapped[str] = mapped_column(String(32), default="human")  # human, evolution, autonomous
 
     # Assignment
-    assigned_lieutenants_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    assigned_lieutenants_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # Wave execution
     wave_count: Mapped[int] = mapped_column(Integer, default=0)
     current_wave: Mapped[int] = mapped_column(Integer, default=0)
-    wave_plan_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    wave_plan_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # Results
-    results_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    results_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
 
     # Pipeline tracking
     pipeline_stage: Mapped[str] = mapped_column(String(32), default="intake")
-    pipeline_log_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    pipeline_log_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # Timestamps
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -238,9 +236,9 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_generate_id)
-    directive_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("directives.id", ondelete="CASCADE"), nullable=True)
-    lieutenant_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("lieutenants.id", ondelete="SET NULL"), nullable=True)
-    parent_task_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    directive_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("directives.id", ondelete="CASCADE"), nullable=True)
+    lieutenant_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("lieutenants.id", ondelete="SET NULL"), nullable=True)
+    parent_task_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
 
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -250,44 +248,44 @@ class Task(Base):
     priority: Mapped[int] = mapped_column(Integer, default=5)
 
     # Input/Output
-    input_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    output_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    artifacts_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    input_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    output_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    artifacts_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # LLM tracking
-    model_used: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    model_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tokens_input: Mapped[int] = mapped_column(Integer, default=0)
     tokens_output: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
     # Quality
-    quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    quality_details_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quality_details_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     # Retry tracking
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, default=5)
-    error_log_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
-    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_log_json: Mapped[list | None] = mapped_column(JSON, default=list)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Pipeline metadata
     pipeline_stage: Mapped[str] = mapped_column(String(32), default="pending")
-    planning_output_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    execution_output_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    critic_output_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    planning_output_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    execution_output_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    critic_output_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     # Timing
-    execution_time_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    execution_time_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
-    directive: Mapped[Optional[Directive]] = relationship("Directive", back_populates="tasks")
-    lieutenant: Mapped[Optional[Lieutenant]] = relationship("Lieutenant", back_populates="tasks")
-    parent_task: Mapped[Optional[Task]] = relationship("Task", remote_side=[id], backref="subtasks")
+    directive: Mapped[Directive | None] = relationship("Directive", back_populates="tasks")
+    lieutenant: Mapped[Lieutenant | None] = relationship("Lieutenant", back_populates="tasks")
+    parent_task: Mapped[Task | None] = relationship("Task", remote_side=[id], backref="subtasks")
 
     __table_args__ = (
         Index("ix_tasks_directive_id", "directive_id"),
@@ -325,7 +323,7 @@ class WarRoom(Base):
     __tablename__ = "war_rooms"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_generate_id)
-    directive_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("directives.id", ondelete="CASCADE"), nullable=True)
+    directive_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("directives.id", ondelete="CASCADE"), nullable=True)
     empire_id: Mapped[str] = mapped_column(String(32), ForeignKey("empires.id", ondelete="CASCADE"), nullable=False)
 
     title: Mapped[str] = mapped_column(String(256), default="")
@@ -333,39 +331,39 @@ class WarRoom(Base):
     session_type: Mapped[str] = mapped_column(String(32), default="planning")  # planning, review, retrospective, debate
 
     # Participants
-    participants_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
-    moderator_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    participants_json: Mapped[list | None] = mapped_column(JSON, default=list)
+    moderator_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Debate
-    debate_topic: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    debate_rounds_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    debate_topic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    debate_rounds_json: Mapped[list | None] = mapped_column(JSON, default=list)
     debate_round_count: Mapped[int] = mapped_column(Integer, default=0)
     consensus_reached: Mapped[bool] = mapped_column(Boolean, default=False)
-    consensus_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    consensus_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Synthesis
-    synthesis_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    synthesis_model: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    synthesis_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    synthesis_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Action items
-    action_items_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    action_items_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # Retrospective
-    retrospective_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    retrospective_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     # Transcript
-    transcript_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    transcript_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # Cost
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
-    directive: Mapped[Optional[Directive]] = relationship("Directive", back_populates="war_rooms")
+    directive: Mapped[Directive | None] = relationship("Directive", back_populates="war_rooms")
     empire: Mapped[Empire] = relationship("Empire", back_populates="war_rooms")
 
     __table_args__ = (
@@ -397,27 +395,27 @@ class KnowledgeEntity(Base):
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
-    attributes_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    attributes_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     confidence: Mapped[float] = mapped_column(Float, default=0.8)
     importance_score: Mapped[float] = mapped_column(Float, default=0.5)
     access_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    source_task_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    source_task_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     source_type: Mapped[str] = mapped_column(String(32), default="extraction")  # extraction, manual, import, bridge
 
     # Deferred: a 1536-float JSON array (~25KB/row). Loading it for every
     # SELECT * was a significant chunk of the OOM problem. Callers that need
     # it (vector search, PageRank seeding) must opt-in with .undefer().
-    embedding_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, deferred=True)
-    tags_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    embedding_json: Mapped[list | None] = mapped_column(JSON, nullable=True, deferred=True)
+    tags_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     empire: Mapped[Empire] = relationship("Empire", back_populates="knowledge_entities")
-    source_task: Mapped[Optional[Task]] = relationship("Task", foreign_keys=[source_task_id])
+    source_task: Mapped[Task | None] = relationship("Task", foreign_keys=[source_task_id])
     outgoing_relations: Mapped[list[KnowledgeRelation]] = relationship(
         "KnowledgeRelation",
         foreign_keys="KnowledgeRelation.source_entity_id",
@@ -466,9 +464,9 @@ class KnowledgeRelation(Base):
     relation_type: Mapped[str] = mapped_column(String(64), nullable=False)
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     confidence: Mapped[float] = mapped_column(Float, default=0.8)
-    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
-    source_task_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source_task_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
@@ -507,7 +505,7 @@ class KnowledgeFact(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_generate_id)
     empire_id: Mapped[str] = mapped_column(String(32), ForeignKey("empires.id", ondelete="CASCADE"), nullable=False)
-    entity_id: Mapped[Optional[str]] = mapped_column(
+    entity_id: Mapped[str | None] = mapped_column(
         String(32), ForeignKey("knowledge_entities.id", ondelete="SET NULL"), nullable=True
     )
 
@@ -534,22 +532,22 @@ class KnowledgeFact(Base):
     access_count: Mapped[int] = mapped_column(Integer, default=0)
 
     # Bi-temporal validity
-    valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Deduplication
     claim_hash: Mapped[str] = mapped_column(String(32), default="")  # MD5 of normalized claim for fast dedup
 
     # Provenance
-    source_task_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    lieutenant_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source_task_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    lieutenant_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     empire: Mapped[Empire] = relationship("Empire")
-    entity: Mapped[Optional[KnowledgeEntity]] = relationship("KnowledgeEntity")
+    entity: Mapped[KnowledgeEntity | None] = relationship("KnowledgeEntity")
 
     __table_args__ = (
         Index("ix_knowledge_facts_empire_id", "empire_id"),
@@ -591,7 +589,7 @@ class SourceReliability(Base):
     unverifiable_count: Mapped[int] = mapped_column(Integer, default=0)
 
     # Metadata
-    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -616,7 +614,7 @@ class MemoryEntry(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_generate_id)
     empire_id: Mapped[str] = mapped_column(String(32), ForeignKey("empires.id", ondelete="CASCADE"), nullable=False)
-    lieutenant_id: Mapped[Optional[str]] = mapped_column(
+    lieutenant_id: Mapped[str | None] = mapped_column(
         String(32), ForeignKey("lieutenants.id", ondelete="CASCADE"), nullable=True
     )
 
@@ -624,10 +622,10 @@ class MemoryEntry(Base):
     category: Mapped[str] = mapped_column(String(64), default="general")
     title: Mapped[str] = mapped_column(String(256), default="")
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    tags_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    tags_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     importance_score: Mapped[float] = mapped_column(Float, default=0.5)
     confidence_score: Mapped[float] = mapped_column(Float, default=0.8)
@@ -638,24 +636,24 @@ class MemoryEntry(Base):
     effective_importance: Mapped[float] = mapped_column(Float, default=0.5)  # importance * decay
 
     # Deferred — same reasoning as KnowledgeEntity.embedding_json.
-    embedding_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, deferred=True)
+    embedding_json: Mapped[list | None] = mapped_column(JSON, nullable=True, deferred=True)
 
-    source_task_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    source_task_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     source_type: Mapped[str] = mapped_column(String(32), default="task")  # task, reflection, import, manual, promotion
 
     # Promotion tracking
-    promoted_from_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    promoted_to_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    promoted_from_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    promoted_to_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
-    last_accessed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     empire: Mapped[Empire] = relationship("Empire", back_populates="memory_entries")
-    lieutenant: Mapped[Optional[Lieutenant]] = relationship("Lieutenant", back_populates="memory_entries")
-    source_task: Mapped[Optional[Task]] = relationship("Task", foreign_keys=[source_task_id])
+    lieutenant: Mapped[Lieutenant | None] = relationship("Lieutenant", back_populates="memory_entries")
+    source_task: Mapped[Task | None] = relationship("Task", foreign_keys=[source_task_id])
 
     __table_args__ = (
         Index("ix_memory_empire_id", "empire_id"),
@@ -702,10 +700,10 @@ class EvolutionProposal(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_generate_id)
     empire_id: Mapped[str] = mapped_column(String(32), ForeignKey("empires.id", ondelete="CASCADE"), nullable=False)
-    lieutenant_id: Mapped[Optional[str]] = mapped_column(
+    lieutenant_id: Mapped[str | None] = mapped_column(
         String(32), ForeignKey("lieutenants.id", ondelete="SET NULL"), nullable=True
     )
-    cycle_id: Mapped[Optional[str]] = mapped_column(
+    cycle_id: Mapped[str | None] = mapped_column(
         String(32), ForeignKey("evolution_cycles.id", ondelete="SET NULL"), nullable=True
     )
 
@@ -715,15 +713,15 @@ class EvolutionProposal(Base):
     rationale: Mapped[str] = mapped_column(Text, default="")
 
     # Changes
-    code_diff: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    changes_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    affected_components_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    code_diff: Mapped[str | None] = mapped_column(Text, nullable=True)
+    changes_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    affected_components_json: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # Review
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
-    review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    reviewer_model: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    review_scores_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewer_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    review_scores_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     # Scoring
     confidence_score: Mapped[float] = mapped_column(Float, default=0.5)
@@ -733,8 +731,8 @@ class EvolutionProposal(Base):
 
     # Application
     applied: Mapped[bool] = mapped_column(Boolean, default=False)
-    applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    application_result_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    application_result_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
     rolled_back: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -742,8 +740,8 @@ class EvolutionProposal(Base):
 
     # Relationships
     empire: Mapped[Empire] = relationship("Empire", back_populates="evolution_proposals")
-    lieutenant: Mapped[Optional[Lieutenant]] = relationship("Lieutenant", back_populates="evolution_proposals")
-    cycle: Mapped[Optional[EvolutionCycle]] = relationship("EvolutionCycle", back_populates="proposals")
+    lieutenant: Mapped[Lieutenant | None] = relationship("Lieutenant", back_populates="evolution_proposals")
+    cycle: Mapped[EvolutionCycle | None] = relationship("EvolutionCycle", back_populates="proposals")
 
     __table_args__ = (
         Index("ix_evolution_proposals_empire_id", "empire_id"),
@@ -782,14 +780,14 @@ class EvolutionCycle(Base):
     applied_count: Mapped[int] = mapped_column(Integer, default=0)
     rolled_back_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    learnings_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
-    metrics_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    learnings_json: Mapped[list | None] = mapped_column(JSON, default=list)
+    metrics_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
@@ -833,14 +831,14 @@ class BudgetLog(Base):
     tokens_output: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, nullable=False)
 
-    task_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
-    lieutenant_id: Mapped[Optional[str]] = mapped_column(
+    task_id: Mapped[str | None] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    lieutenant_id: Mapped[str | None] = mapped_column(
         String(32), ForeignKey("lieutenants.id", ondelete="SET NULL"), nullable=True
     )
-    directive_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    directive_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     purpose: Mapped[str] = mapped_column(String(64), default="task_execution")
-    purpose_detail: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    purpose_detail: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
     # Daily/monthly aggregation helpers
     cost_date: Mapped[str] = mapped_column(String(10), nullable=False)  # YYYY-MM-DD
@@ -850,8 +848,8 @@ class BudgetLog(Base):
 
     # Relationships
     empire: Mapped[Empire] = relationship("Empire", back_populates="budget_logs")
-    task: Mapped[Optional[Task]] = relationship("Task", foreign_keys=[task_id])
-    lieutenant: Mapped[Optional[Lieutenant]] = relationship("Lieutenant", back_populates="budget_logs")
+    task: Mapped[Task | None] = relationship("Task", foreign_keys=[task_id])
+    lieutenant: Mapped[Lieutenant | None] = relationship("Lieutenant", back_populates="budget_logs")
 
     __table_args__ = (
         Index("ix_budget_logs_empire_id", "empire_id"),
@@ -884,9 +882,9 @@ class HealthCheck(Base):
     check_type: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)  # healthy, degraded, unhealthy
     message: Mapped[str] = mapped_column(String(256), default="")
-    details_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    details_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
-    response_time_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    response_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -925,23 +923,23 @@ class SchedulerJob(Base):
 
     # Scheduling
     interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
-    cron_expression: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    cron_expression: Mapped[str | None] = mapped_column(String(64), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=5)
 
     # Execution tracking
-    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     run_count: Mapped[int] = mapped_column(Integer, default=0)
     success_count: Mapped[int] = mapped_column(Integer, default=0)
     error_count: Mapped[int] = mapped_column(Integer, default=0)
     consecutive_errors: Mapped[int] = mapped_column(Integer, default=0)
 
-    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    last_duration_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    avg_duration_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    config_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    config_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
@@ -985,19 +983,19 @@ class CrossEmpireSync(Base):
     status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, in_progress, completed, failed
 
     # Payload
-    payload_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    payload_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
     entities_synced: Mapped[int] = mapped_column(Integer, default=0)
     relations_synced: Mapped[int] = mapped_column(Integer, default=0)
     conflicts_found: Mapped[int] = mapped_column(Integer, default=0)
     conflicts_resolved: Mapped[int] = mapped_column(Integer, default=0)
 
     # Results
-    result_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_cross_sync_source", "source_empire_id"),
@@ -1029,12 +1027,12 @@ class GodPanelCommand(Base):
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     topic: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="accepted")
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    result_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_gpc_empire_id", "empire_id"),

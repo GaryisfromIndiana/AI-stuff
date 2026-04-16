@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, func, and_, desc, asc
+from sqlalchemy import and_, desc, func, select
 
-from db.models import EvolutionProposal, EvolutionCycle
+from db.models import EvolutionCycle, EvolutionProposal
 from db.repositories.base import BaseRepository
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class EvolutionRepository(BaseRepository[EvolutionProposal]):
         return self.update(
             proposal_id,
             applied=True,
-            applied_at=datetime.now(timezone.utc),
+            applied_at=datetime.now(UTC),
             application_result_json=result or {},
         )
 
@@ -93,7 +93,7 @@ class EvolutionRepository(BaseRepository[EvolutionProposal]):
 
     def get_proposal_stats(self, empire_id: str, days: int = 30) -> dict:
         """Get proposal statistics."""
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         stmt = (
             select(
@@ -208,7 +208,7 @@ class EvolutionRepository(BaseRepository[EvolutionProposal]):
         return self.update_cycle(
             cycle_id,
             status="completed",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             learnings_json=learnings or [],
             summary=summary,
         )
@@ -261,9 +261,9 @@ class EvolutionRepository(BaseRepository[EvolutionProposal]):
 
         completed = latest.completed_at
         if completed.tzinfo is None:
-            completed = completed.replace(tzinfo=timezone.utc)
+            completed = completed.replace(tzinfo=UTC)
         threshold = completed + timedelta(hours=cooldown_hours)
-        return datetime.now(timezone.utc) >= threshold
+        return datetime.now(UTC) >= threshold
 
     def get_improvement_trend(self, empire_id: str, limit: int = 10) -> list[dict]:
         """Get trend data showing improvement over cycles."""

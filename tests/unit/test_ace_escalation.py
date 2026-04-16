@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from core.ace.engine import ACEEngine, ACEContext, TaskInput
+from core.ace.engine import ACEEngine, TaskInput
 
 
 def test_ace_escalates_to_opus_after_repeated_quality_failures() -> None:

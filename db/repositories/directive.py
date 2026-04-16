@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import select, func, and_, desc, asc
+from sqlalchemy import and_, asc, desc, func, select
 
 from db.models import Directive, Task
 from db.repositories.base import BaseRepository
@@ -66,7 +66,7 @@ class DirectiveRepository(BaseRepository[Directive]):
         limit: int = 50,
     ) -> list[Directive]:
         """Get recently completed directives."""
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
         stmt = (
             select(Directive)
             .where(and_(
@@ -253,7 +253,7 @@ class DirectiveRepository(BaseRepository[Directive]):
         return self.update(
             directive_id,
             status="planning",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             pipeline_stage="planning",
         )
 
@@ -261,7 +261,7 @@ class DirectiveRepository(BaseRepository[Directive]):
         """Mark directive as completed."""
         updates: dict[str, Any] = {
             "status": "completed",
-            "completed_at": datetime.now(timezone.utc),
+            "completed_at": datetime.now(UTC),
             "pipeline_stage": "delivered",
         }
         if results:
@@ -273,13 +273,13 @@ class DirectiveRepository(BaseRepository[Directive]):
         return self.update(
             directive_id,
             status="failed",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             results_json={"error": error},
         )
 
     def get_stats(self, empire_id: str, days: int = 30) -> dict:
         """Get directive statistics for an empire."""
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         stmt = (
             select(

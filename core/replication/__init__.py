@@ -1,5 +1,5 @@
 """Replication system — empire generation and cross-empire networking."""
 
-from core.replication.generator import EmpireGenerator, GeneratedEmpire, EmpireTemplate, EMPIRE_TEMPLATES
+from core.replication.generator import EMPIRE_TEMPLATES, EmpireGenerator, EmpireTemplate, GeneratedEmpire
 
-__all__ = ["EmpireGenerator", "GeneratedEmpire", "EmpireTemplate", "EMPIRE_TEMPLATES"]
+__all__ = ["EMPIRE_TEMPLATES", "EmpireGenerator", "EmpireTemplate", "GeneratedEmpire"]

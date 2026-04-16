@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 
-from flask import Blueprint, render_template, jsonify, current_app
+from flask import Blueprint, current_app, jsonify, render_template
 from sqlalchemy import and_, func, select
 
 logger = logging.getLogger(__name__)
@@ -15,8 +16,8 @@ dashboard_bp = Blueprint("dashboard", __name__)
 def _fetch_dashboard_data(empire_id: str) -> dict:
     """Collect all dashboard data. Shared by HTML and JSON endpoints."""
     from db.engine import read_session
-    from db.repositories.empire import EmpireRepository
     from db.repositories.directive import DirectiveRepository
+    from db.repositories.empire import EmpireRepository
 
     with read_session() as session:
         # Empire overview
@@ -128,9 +129,10 @@ def _fetch_dashboard_data(empire_id: str) -> dict:
                 }
             if not scheduler_info.get("total_ticks"):
                 try:
-                    from datetime import datetime, timezone, timedelta
-                    from db.models import WarRoom, Task
-                    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+                    from datetime import datetime, timedelta
+
+                    from db.models import Task, WarRoom
+                    one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
                     tick_check = session.execute(select(func.count(WarRoom.id)).where(
                         WarRoom.created_at > one_hour_ago
                     )).scalar() or 0

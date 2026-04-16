@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -123,11 +122,12 @@ class KnowledgeGraph:
         Returns:
             Created entity as dict.
         """
-        from datetime import datetime, timezone
-        from db.engine import repo_scope
-        from db.repositories.knowledge import KnowledgeRepository
+        from datetime import datetime
 
         from sqlalchemy.exc import IntegrityError
+
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
 
         with repo_scope(KnowledgeRepository) as repo:
             # Enrich attributes with temporal data
@@ -136,7 +136,7 @@ class KnowledgeGraph:
                 enriched_attrs["valid_from"] = valid_from
             if valid_to:
                 enriched_attrs["valid_to"] = valid_to
-            enriched_attrs["last_seen"] = datetime.now(timezone.utc).isoformat()
+            enriched_attrs["last_seen"] = datetime.now(UTC).isoformat()
 
             # Try insert first — unique constraint catches races
             try:
@@ -166,7 +166,7 @@ class KnowledgeGraph:
             merged_attrs.update(enriched_attrs)
             merged_attrs["update_count"] = merged_attrs.get("update_count", 0) + 1
 
-            update_fields = {"attributes_json": merged_attrs, "updated_at": datetime.now(timezone.utc)}
+            update_fields = {"attributes_json": merged_attrs, "updated_at": datetime.now(UTC)}
             if confidence > existing.confidence:
                 update_fields["confidence"] = confidence
             if description and len(description) > len(existing.description or ""):
@@ -178,7 +178,8 @@ class KnowledgeGraph:
 
     def update_entity(self, name: str, description: str = "", **kwargs) -> bool:
         """Update an existing entity's description or other fields."""
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         from db.engine import repo_scope
         from db.repositories.knowledge import KnowledgeRepository
 
@@ -186,7 +187,7 @@ class KnowledgeGraph:
             entity = repo.get_by_name(name, self.empire_id)
             if not entity:
                 return False
-            update_fields = {"updated_at": datetime.now(timezone.utc)}
+            update_fields = {"updated_at": datetime.now(UTC)}
             if description:
                 update_fields["description"] = description
             update_fields.update(kwargs)
@@ -196,7 +197,8 @@ class KnowledgeGraph:
 
     def update_entity_attributes(self, name: str, attributes: dict) -> bool:
         """Merge new attributes into an existing entity's attributes."""
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         from db.engine import repo_scope
         from db.repositories.knowledge import KnowledgeRepository
 
@@ -206,7 +208,7 @@ class KnowledgeGraph:
                 return False
             merged = dict(entity.attributes_json or {})
             merged.update(attributes)
-            repo.update(entity.id, attributes_json=merged, updated_at=datetime.now(timezone.utc))
+            repo.update(entity.id, attributes_json=merged, updated_at=datetime.now(UTC))
             repo.commit()
             return True
 
@@ -301,13 +303,13 @@ class KnowledgeGraph:
                 return None
 
             # Enrich metadata
-            from datetime import datetime as dt, timezone as tz
+            from datetime import datetime as dt
             enriched_meta = dict(metadata or {})
             enriched_meta["valid_from"] = valid_from
             enriched_meta["valid_to"] = valid_to
             enriched_meta["evidence"] = evidence
             enriched_meta["source_task_id"] = source_task_id
-            enriched_meta["created_at"] = dt.now(tz.utc).isoformat()
+            enriched_meta["created_at"] = dt.now(UTC).isoformat()
 
             # Get inverse label
             inverse = self.INVERSE_RELATIONS.get(relation_type, "related_to")
@@ -500,6 +502,7 @@ class KnowledgeGraph:
         with repo_scope(KnowledgeRepository) as repo:
             from sqlalchemy import select
             from sqlalchemy.orm import joinedload
+
             from db.models import KnowledgeEntity
 
             # Eager load outgoing_relations to avoid N+1 queries
@@ -557,8 +560,9 @@ class KnowledgeGraph:
         from db.repositories.knowledge import KnowledgeRepository
 
         with repo_scope(KnowledgeRepository) as repo:
-            from sqlalchemy import select, and_
+            from sqlalchemy import and_, select
             from sqlalchemy.orm import joinedload
+
             from db.models import KnowledgeEntity
 
             # Fetch all entities with eager-loaded relations to avoid N+1
@@ -715,8 +719,8 @@ class KnowledgeGraph:
 
             # ── 4. Verified facts ─────────────────────────────────────
             if include_facts:
-                from db.repositories.facts import FactsRepository
                 from db.engine import repo_scope as _rs
+                from db.repositories.facts import FactsRepository
 
                 try:
                     with _rs(FactsRepository) as facts_repo:
@@ -774,7 +778,8 @@ class KnowledgeGraph:
         with repo_scope(KnowledgeRepository) as repo:
             from sqlalchemy import select
             from sqlalchemy.orm import joinedload
-            from db.models import KnowledgeEntity, KnowledgeRelation
+
+            from db.models import KnowledgeEntity
 
             # Eager load outgoing_relations to avoid N+1 queries
             stmt = (

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Generator, Optional
-from unittest.mock import MagicMock
+from collections.abc import Generator
+from typing import Any
 
 import pytest
 
 from llm.base import (
-    LLMClient, LLMRequest, LLMResponse, LLMMessage,
-    RateLimiter, StreamChunk,
+    LLMClient,
+    LLMMessage,
+    LLMRequest,
+    LLMResponse,
+    RateLimiter,
+    StreamChunk,
 )
 
 
@@ -46,7 +50,7 @@ class FakeClient(LLMClient):
             latency_ms=latency_ms,
         )
 
-    def _classify_error(self, error: Exception, attempt: int) -> Optional[float]:
+    def _classify_error(self, error: Exception, attempt: int) -> float | None:
         if isinstance(error, ConnectionError):
             return 0.0  # Retry immediately
         return None  # Fatal

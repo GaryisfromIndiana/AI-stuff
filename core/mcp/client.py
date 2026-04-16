@@ -15,7 +15,6 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +69,11 @@ class StdioTransport:
     def __init__(self, command: list[str], env: dict[str, str] | None = None):
         self._command = command
         self._env = env
-        self._process: Optional[subprocess.Popen] = None
+        self._process: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._response_events: dict[str, threading.Event] = {}
         self._responses: dict[str, dict] = {}
-        self._reader_thread: Optional[threading.Thread] = None
+        self._reader_thread: threading.Thread | None = None
         self._running = False
 
     def start(self) -> None:
@@ -175,12 +174,12 @@ class SSETransport:
     def __init__(self, url: str, headers: dict[str, str] | None = None):
         self._url = url
         self._headers = headers or {}
-        self._session_url: Optional[str] = None
+        self._session_url: str | None = None
         self._responses: dict[str, dict] = {}
         self._response_events: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
         self._running = False
-        self._sse_thread: Optional[threading.Thread] = None
+        self._sse_thread: threading.Thread | None = None
 
     def start(self) -> None:
         """Connect to the SSE endpoint."""
@@ -196,8 +195,8 @@ class SSETransport:
 
     def send(self, message: dict, timeout: float = 30.0) -> dict:
         """Send a JSON-RPC message via HTTP POST."""
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         msg_id = message.get("id")
         if msg_id is None:
@@ -299,7 +298,7 @@ class MCPClient:
     ):
         self.name = name
         self._timeout = timeout
-        self._server_info: Optional[MCPServerInfo] = None
+        self._server_info: MCPServerInfo | None = None
         self._tools: list[MCPToolSchema] = []
         self._connected = False
 
@@ -397,7 +396,7 @@ class MCPClient:
         return self._connected and self._transport.is_alive
 
     @property
-    def server_info(self) -> Optional[MCPServerInfo]:
+    def server_info(self) -> MCPServerInfo | None:
         return self._server_info
 
     @property

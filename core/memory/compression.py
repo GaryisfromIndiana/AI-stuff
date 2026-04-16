@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +122,7 @@ class MemoryCompressor:
                 if created:
                     try:
                         created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                        if (datetime.now(timezone.utc) - created_dt).total_seconds() < 86400:
+                        if (datetime.now(UTC) - created_dt).total_seconds() < 86400:
                             continue
                     except Exception:
                         pass
@@ -184,7 +183,7 @@ class MemoryCompressor:
         combined = "\n\n".join(memory_texts)
 
         # Use LLM to compress
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import ModelRouter, TaskMetadata
 
         router = ModelRouter()
@@ -250,7 +249,7 @@ Respond as JSON:
                     "original_type": cluster.memory_type,
                     "time_range": data.get("time_range", ""),
                     "entities_mentioned": data.get("entities_mentioned", []),
-                    "compression_date": datetime.now(timezone.utc).isoformat(),
+                    "compression_date": datetime.now(UTC).isoformat(),
                 },
             )
 
@@ -296,7 +295,7 @@ Respond as JSON:
                             # Mark as compressed in metadata
                             meta = dict(entry.metadata_json or {})
                             meta["compressed"] = True
-                            meta["compressed_at"] = datetime.now(timezone.utc).isoformat()
+                            meta["compressed_at"] = datetime.now(UTC).isoformat()
                             entry.metadata_json = meta
 
         except Exception as e:

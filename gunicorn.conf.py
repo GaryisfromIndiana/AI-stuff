@@ -1,6 +1,5 @@
 """Gunicorn configuration for Empire AI."""
 
-import multiprocessing
 import os
 
 # Server

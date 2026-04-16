@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 import time
 import uuid
-from typing import Any
 
 
 def generate_id(prefix: str = "", length: int = 16) -> str:

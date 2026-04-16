@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from flask import Blueprint, render_template, jsonify, request, current_app
+
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 logger = logging.getLogger(__name__)
 memory_bp = Blueprint("memory", __name__)
@@ -120,9 +121,10 @@ def repair_decay():
     unless they've been explicitly superseded.
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
+    from sqlalchemy import select
+
     from db.engine import session_scope
     from db.models import MemoryEntry
-    from sqlalchemy import select
 
     restored = 0
     by_type = {"semantic": 0, "experiential": 0, "design": 0}
@@ -170,9 +172,10 @@ def qdrant_migrate():
         if not vs.enabled:
             return jsonify({"error": "Qdrant not configured. Set EMPIRE_QDRANT__URL."}), 400
 
+        from sqlalchemy import and_, select
+
         from db.engine import session_scope
-        from db.models import MemoryEntry, KnowledgeEntity
-        from sqlalchemy import select, and_
+        from db.models import KnowledgeEntity, MemoryEntry
 
         mem_count = 0
         ent_count = 0
@@ -234,9 +237,10 @@ def qdrant_migrate():
 @memory_bp.route("/qdrant/debug")
 def qdrant_debug():
     """Debug endpoint to check what the migration query finds."""
+    from sqlalchemy import and_, func, select
+
     from db.engine import session_scope
-    from db.models import MemoryEntry, KnowledgeEntity
-    from sqlalchemy import select, and_, func
+    from db.models import KnowledgeEntity, MemoryEntry
 
     result = {}
     with session_scope() as session:
@@ -313,9 +317,10 @@ def qdrant_debug():
 def embedding_status():
     """Check how many memories and KG entities have embeddings."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
+    from sqlalchemy import and_, func, select
+
     from db.engine import get_session
-    from db.models import MemoryEntry, KnowledgeEntity
-    from sqlalchemy import select, func, and_
+    from db.models import KnowledgeEntity, MemoryEntry
 
     session = get_session()
     try:

@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-import time
 import sys
+import time
 from pathlib import Path
 
 # Add parent to path
@@ -76,7 +76,7 @@ def run_benchmarks(empire_id: str = "") -> None:
         t1 = benchmark_neighbors(empire_id, depth=2)
         print(f"   ✓ Completed in {t1:.2f}s")
         if t1 > 5.0:
-            print(f"   ⚠ Slow (expected < 2s). Check if N+1 fixes applied.")
+            print("   ⚠ Slow (expected < 2s). Check if N+1 fixes applied.")
     except Exception as e:
         print(f"   ✗ Failed: {e}")
     
@@ -86,7 +86,7 @@ def run_benchmarks(empire_id: str = "") -> None:
         t2 = benchmark_query(empire_id)
         print(f"   ✓ Completed in {t2:.2f}s")
         if t2 > 3.0:
-            print(f"   ⚠ Slow (expected < 1s). Check if batch fetching applied.")
+            print("   ⚠ Slow (expected < 1s). Check if batch fetching applied.")
     except Exception as e:
         print(f"   ✗ Failed: {e}")
     
@@ -96,7 +96,7 @@ def run_benchmarks(empire_id: str = "") -> None:
         t3 = benchmark_export_graph(empire_id)
         print(f"   ✓ Completed in {t3:.2f}s")
         if t3 > 10.0:
-            print(f"   ⚠ Slow (expected < 5s). Check if eager loading applied.")
+            print("   ⚠ Slow (expected < 5s). Check if eager loading applied.")
     except Exception as e:
         print(f"   ✗ Failed: {e}")
     

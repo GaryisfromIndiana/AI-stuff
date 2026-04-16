@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
 
 from core.ace.engine import ACEEngine
-from core.lieutenant.base import Lieutenant, PerformanceStats
-from core.lieutenant.persona import PersonaConfig, create_persona, PERSONA_TEMPLATES
+from core.lieutenant.base import Lieutenant
+from core.lieutenant.persona import PersonaConfig, create_persona
 from db.engine import repo_scope
 
 logger = logging.getLogger(__name__)
@@ -314,7 +313,7 @@ class LieutenantManager:
                     results["total_gaps"] += cycle_result.get("gaps_found", 0)
                     results["total_researched"] += cycle_result.get("researched", 0)
 
-                    repo.update(db_lt.id, last_learning_at=datetime.now(timezone.utc))
+                    repo.update(db_lt.id, last_learning_at=datetime.now(UTC))
 
             repo.commit()
             logger.info("Learning cycles complete: %s", results)

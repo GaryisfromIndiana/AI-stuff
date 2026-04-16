@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from flask import Blueprint, render_template, jsonify, request, current_app
+
+from flask import Blueprint, current_app, jsonify, render_template
 
 logger = logging.getLogger(__name__)
 budget_bp = Blueprint("budget", __name__)

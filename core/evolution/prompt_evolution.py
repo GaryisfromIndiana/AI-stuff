@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +115,7 @@ class PromptEvolver:
                 )
 
             # Ask LLM to propose prompt improvements
-            from llm.base import LLMRequest, LLMMessage
+            from llm.base import LLMMessage, LLMRequest
             from llm.router import ModelRouter, TaskMetadata
 
             router = ModelRouter()

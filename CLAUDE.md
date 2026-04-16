@@ -35,3 +35,14 @@ python -m cli.commands scheduler start  # Start autonomous daemon
 
 ## Stack
 Python 3.12 · SQLite · Flask · SQLAlchemy · Pydantic · Claude · APScheduler
+
+## Architecture & boundaries
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full module contract. Short version:
+
+```
+web/ · cli/   →   core/   →   llm/   →   db/   →   utils/ · config/
+```
+
+Arrows go down only. Imports upward are rejected by `lint-imports` in CI. Callers import from each package's public `__init__.py` (enforced by ruff `flake8-tidy-imports`), not from deep paths.
+
+**Before landing a change**: `ruff check . && ruff format --check . && lint-imports && mypy config utils llm/schemas.py`

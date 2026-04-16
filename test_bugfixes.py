@@ -3,7 +3,7 @@ import importlib
 import json
 
 # Bug #1: JSON extraction from markdown
-from llm.schemas import _find_json_object, _extract_json_block
+from llm.schemas import _extract_json_block, _find_json_object
 
 md = '```json\n{"waves": [{"wave_number": 1, "tasks": [{"title": "test"}]}]}\n```'
 block = _extract_json_block(md)

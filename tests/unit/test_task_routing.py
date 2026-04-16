@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from llm.router import TASK_ROUTING, COMPLEXITY_TIERS, TaskRouting
+from llm.router import COMPLEXITY_TIERS, TASK_ROUTING, TaskRouting
 
 
 def test_all_entries_are_task_routing_instances():

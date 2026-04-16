@@ -79,7 +79,7 @@ class Validator:
         """Require value to match a regex pattern."""
         value = self._data.get(field, "")
         if isinstance(value, str) and not re.match(pattern, value):
-            msg = message or f"does not match expected pattern"
+            msg = message or "does not match expected pattern"
             self._errors.append(ValidationError(field, msg, value))
         return self
 
@@ -184,7 +184,7 @@ def sanitize_dict(data: dict, max_depth: int = 5, current_depth: int = 0) -> dic
     if current_depth >= max_depth:
         return {}
 
-    sanitized = {}
+    sanitized: dict = {}
     for key, value in data.items():
         if isinstance(key, str):
             key = sanitize_string(key, 256)

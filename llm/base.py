@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-import random
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from dataclasses import dataclass, field
-from typing import Any, Generator, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +17,10 @@ class LLMMessage:
     """A single message in a conversation."""
     role: str  # system, user, assistant, tool
     content: str
-    name: Optional[str] = None
-    tool_call_id: Optional[str] = None
-    tool_calls: Optional[list[dict]] = None
-    metadata: Optional[dict] = None
+    name: str | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[dict] | None = None
+    metadata: dict | None = None
 
     @staticmethod
     def system(content: str) -> LLMMessage:
@@ -81,7 +81,7 @@ class ToolCall:
     id: str
     name: str
     arguments: dict
-    raw: Optional[dict] = None
+    raw: dict | None = None
 
 
 @dataclass
@@ -95,8 +95,8 @@ class LLMRequest:
     top_p: float = 1.0
     stop_sequences: list[str] = field(default_factory=list)
     tools: list[ToolDefinition] = field(default_factory=list)
-    tool_choice: Optional[str] = None  # auto, none, required, or specific tool name
-    response_format: Optional[str] = None  # json, text
+    tool_choice: str | None = None  # auto, none, required, or specific tool name
+    response_format: str | None = None  # json, text
     metadata: dict = field(default_factory=dict)
 
     @property
@@ -117,7 +117,7 @@ class LLMResponse:
     tool_log: list[dict] = field(default_factory=list)  # [{tool, args, result, chars}] from complete_with_tools
     finish_reason: str = "stop"  # stop, tool_calls, length, error
     latency_ms: float = 0.0
-    raw_response: Optional[Any] = None
+    raw_response: Any | None = None
 
     @property
     def has_tool_calls(self) -> bool:
@@ -148,8 +148,8 @@ class LLMResponse:
 class StreamChunk:
     """A single chunk from a streaming response."""
     content: str = ""
-    tool_call_delta: Optional[dict] = None
-    finish_reason: Optional[str] = None
+    tool_call_delta: dict | None = None
+    finish_reason: str | None = None
     is_final: bool = False
 
 
@@ -286,7 +286,7 @@ class LLMClient(ABC):
         ...
 
     @abstractmethod
-    def _classify_error(self, error: Exception, attempt: int) -> Optional[float]:
+    def _classify_error(self, error: Exception, attempt: int) -> float | None:
         """Classify an error. Return wait seconds if retryable, None if fatal."""
         ...
 

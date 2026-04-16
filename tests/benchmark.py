@@ -3,19 +3,20 @@
 Performance Verification Test Script for Empire AI
 Measures the impact of key optimizations on execution speed, cost, and reliability.
 """
-import time
+import argparse
 import json
 import logging
 import random
 import statistics
-import argparse
-from datetime import datetime, timezone
-from typing import Callable, Any
-from dataclasses import dataclass, field
+import time
+from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 # Ensure fresh engine on startup
 import db.engine as _eng
+
 if _eng._engine is None:
     _eng.get_engine()  # Initialize once
 
@@ -325,7 +326,7 @@ def run_all_benchmarks(iterations: int = 5) -> dict:
     logger.info("=" * 70)
 
     results = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "iterations": iterations,
         "tests": {},
         "comparisons": [],

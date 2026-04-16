@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -47,7 +47,7 @@ def test_find_clusters_detects_seeded_old_memories() -> None:
         )
         seeded_ids.append(created["id"])
 
-    old_ts = datetime.now(timezone.utc) - timedelta(days=2)
+    old_ts = datetime.now(UTC) - timedelta(days=2)
     with session_scope() as session:
         for mem_id in seeded_ids:
             entry = session.get(MemoryEntry, mem_id)

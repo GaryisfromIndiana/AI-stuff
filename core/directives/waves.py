@@ -239,8 +239,8 @@ class WaveExecutor:
         previous_results: list[dict] | None,
     ) -> dict:
         """Execute a single task within a wave."""
-        from core.lieutenant.manager import LieutenantManager
         from core.ace.engine import TaskInput
+        from core.lieutenant.manager import LieutenantManager
 
         lt_manager = LieutenantManager(self.empire_id)
 

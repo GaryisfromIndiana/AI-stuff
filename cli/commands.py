@@ -11,15 +11,14 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the Empire web server."""
-    from web.app import create_app
     from config.settings import get_settings
+    from web.app import create_app
     settings = get_settings()
 
     app = create_app()
@@ -76,7 +75,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
         description=args.description or "",
     )
 
-    print(f"Empire generated:")
+    print("Empire generated:")
     print(f"  ID: {result.empire_id}")
     print(f"  Lieutenants: {result.lieutenants_created}")
     print(f"  Database: {'initialized' if result.database_initialized else 'pending'}")
@@ -181,7 +180,7 @@ def cmd_evolve(args: argparse.Namespace) -> None:
         print(f"Approved: {result.approved}")
         print(f"Applied: {result.applied}")
         print(f"Cost: ${result.total_cost:.4f}")
-        print(f"Learnings:")
+        print("Learnings:")
         for learning in result.learnings:
             print(f"  - {learning}")
 
@@ -261,12 +260,12 @@ def cmd_budget(args: argparse.Namespace) -> None:
     bm = BudgetManager(empire_id)
     report = bm.get_budget_report()
 
-    print(f"Budget Report")
+    print("Budget Report")
     print(f"  Daily:   ${report.daily_spend:.4f} / ${report.daily_remaining + report.daily_spend:.2f} (${report.daily_remaining:.4f} remaining)")
     print(f"  Monthly: ${report.monthly_spend:.4f} / ${report.monthly_remaining + report.monthly_spend:.2f} (${report.monthly_remaining:.4f} remaining)")
 
     if report.alerts:
-        print(f"\nAlerts:")
+        print("\nAlerts:")
         for alert in report.alerts:
             print(f"  [{alert.severity}] {alert.message}")
 
@@ -338,6 +337,12 @@ def main() -> None:
 
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s: %(message)s")
+
+    # Wire the spend recorder so llm.router can record LLM cost without
+    # importing core/. See ARCHITECTURE.md § Documented exceptions.
+    from core.routing.budget import BudgetManager
+    from llm import register_spend_recorder_factory
+    register_spend_recorder_factory(BudgetManager)
 
     commands = {
         "serve": cmd_serve,

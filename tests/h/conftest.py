@@ -7,7 +7,6 @@ from collections.abc import Generator
 
 import pytest
 
-
 DEFAULT_TEST_TIMEOUT_SECONDS = 8
 
 

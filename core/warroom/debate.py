@@ -6,9 +6,8 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ class Argument:
 
     def __post_init__(self):
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -113,7 +112,7 @@ class Debate:
     participants: list[dict] = field(default_factory=list)
     rounds: list[DebateRound] = field(default_factory=list)
     status: str = "active"  # active, completed, consensus_reached
-    consensus: Optional[ConsensusCheck] = None
+    consensus: ConsensusCheck | None = None
     final_summary: str = ""
     total_cost: float = 0.0
     duration_seconds: float = 0.0
@@ -243,7 +242,7 @@ class DebateEngine:
         context: str,
     ) -> list[Argument]:
         """Collect arguments from each participant."""
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -326,7 +325,7 @@ Respond as JSON:
         round_number: int,
     ) -> list[Rebuttal]:
         """Collect rebuttals from participants to other arguments."""
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -407,7 +406,7 @@ Respond as JSON:
 
     def _score_arguments_llm(self, arguments: list[Argument]) -> list[ScoredArgument]:
         """Score arguments using an LLM for nuanced evaluation."""
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -518,7 +517,7 @@ Return valid JSON only:
 
     def _check_consensus_llm(self, latest_round: DebateRound, positions: list[str]) -> ConsensusCheck:
         """Use LLM to evaluate whether positions agree on substance."""
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()

@@ -5,10 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +30,7 @@ class CacheEntry:
             return True
         try:
             created = datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
-            age = (datetime.now(timezone.utc) - created).total_seconds()
+            age = (datetime.now(UTC) - created).total_seconds()
             return age > self.ttl_seconds
         except (ValueError, TypeError):
             return True
@@ -92,7 +90,7 @@ class LLMCache:
         prompt_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
         return f"llm:cache:{model}:{prompt_hash}"
 
-    def get(self, model: str, prompt: str, system_prompt: str = "") -> Optional[CacheEntry]:
+    def get(self, model: str, prompt: str, system_prompt: str = "") -> CacheEntry | None:
         if not self.enabled or not self._redis:
             self._misses += 1
             return None
@@ -138,7 +136,7 @@ class LLMCache:
             tokens_input=tokens_input,
             tokens_output=tokens_output,
             cost_usd=cost_usd,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             ttl_seconds=ttl_seconds,
         )
         try:
@@ -185,7 +183,7 @@ class LLMCache:
 
 
 # Module-level singleton
-_cache: Optional[LLMCache] = None
+_cache: LLMCache | None = None
 
 
 def get_cache(redis_url: str = "", enabled: bool = True) -> LLMCache:
@@ -228,5 +226,5 @@ def cache_llm_response(
     )
 
 
-def get_cached_response(model: str, prompt: str, system_prompt: str = "") -> Optional[CacheEntry]:
+def get_cached_response(model: str, prompt: str, system_prompt: str = "") -> CacheEntry | None:
     return get_cache().get(model, prompt, system_prompt)

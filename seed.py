@@ -9,7 +9,7 @@ def seed():
 
     with session_scope(engine) as session:
         # Check if already seeded
-        from sqlalchemy import select, func
+        from sqlalchemy import func, select
         existing = session.execute(select(Empire).where(Empire.id == "empire-alpha")).scalar_one_or_none()
         lt_count = session.execute(select(func.count()).select_from(Lieutenant).where(Lieutenant.empire_id == "empire-alpha")).scalar() or 0
         if existing and lt_count >= 6:

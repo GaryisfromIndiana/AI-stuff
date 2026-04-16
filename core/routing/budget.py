@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +103,7 @@ class BudgetManager:
             from db.engine import session_scope
             from db.models import BudgetLog
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             with session_scope() as session:
                 log = BudgetLog(
@@ -181,12 +180,12 @@ class BudgetManager:
 
     def get_daily_spend(self) -> float:
         """Get total spend for today."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         return self._get_spend_for_date(today)
 
     def get_monthly_spend(self) -> float:
         """Get total spend for this month."""
-        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        month = datetime.now(UTC).strftime("%Y-%m")
         return self._get_spend_for_month(month)
 
     def get_remaining_daily(self) -> float:
@@ -314,8 +313,9 @@ class BudgetManager:
     def _get_spend_for_date(self, date_str: str) -> float:
         """Get total spend for a specific date."""
         try:
+            from sqlalchemy import func, select
+
             from db.engine import get_session
-            from sqlalchemy import select, func
             from db.models import BudgetLog
 
             session = get_session()
@@ -334,8 +334,9 @@ class BudgetManager:
     def _get_spend_for_month(self, month_str: str) -> float:
         """Get total spend for a specific month."""
         try:
+            from sqlalchemy import func, select
+
             from db.engine import get_session
-            from sqlalchemy import select, func
             from db.models import BudgetLog
 
             session = get_session()

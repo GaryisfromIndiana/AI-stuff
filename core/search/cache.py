@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +63,10 @@ class ScrapeCache:
         url_hash = self._hash_url(url)
 
         try:
+            from sqlalchemy import and_, select
+
             from db.engine import get_session
             from db.models import MemoryEntry
-            from sqlalchemy import select, and_
 
             session = get_session()
             stmt = (
@@ -85,14 +85,14 @@ class ScrapeCache:
                 return None
 
             # Check expiry
-            if entry.expires_at and entry.expires_at < datetime.now(timezone.utc):
+            if entry.expires_at and entry.expires_at < datetime.now(UTC):
                 self._misses += 1
                 return None
 
             # Cache hit
             self._hits += 1
             entry.access_count += 1
-            entry.last_accessed_at = datetime.now(timezone.utc)
+            entry.last_accessed_at = datetime.now(UTC)
             session.commit()
 
             meta = entry.metadata_json or {}
@@ -151,7 +151,7 @@ class ScrapeCache:
                     "title": title,
                     "domain": domain,
                     "word_count": word_count,
-                    "scraped_at": datetime.now(timezone.utc).isoformat(),
+                    "scraped_at": datetime.now(UTC).isoformat(),
                 },
             )
             logger.debug("Cached: %s (%d words, TTL=%dh)", domain, word_count, ttl)
@@ -167,9 +167,10 @@ class ScrapeCache:
         """Remove a URL from cache."""
         url_hash = self._hash_url(url)
         try:
+            from sqlalchemy import and_, delete
+
             from db.engine import get_session
             from db.models import MemoryEntry
-            from sqlalchemy import select, and_, delete
 
             session = get_session()
             stmt = (
@@ -190,12 +191,13 @@ class ScrapeCache:
     def clear_expired(self) -> int:
         """Remove all expired cache entries."""
         try:
+            from sqlalchemy import and_, delete
+
             from db.engine import get_session
             from db.models import MemoryEntry
-            from sqlalchemy import delete, and_
 
             session = get_session()
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             stmt = (
                 delete(MemoryEntry)
                 .where(and_(
@@ -216,9 +218,10 @@ class ScrapeCache:
         """Get cache statistics."""
         total = self._hits + self._misses
         try:
+            from sqlalchemy import and_, func, select
+
             from db.engine import get_session
             from db.models import MemoryEntry
-            from sqlalchemy import select, func, and_
 
             session = get_session()
             count = session.execute(
@@ -266,12 +269,13 @@ class ResearchDeduplicator:
             True if topic was researched within the window.
         """
         try:
+            from sqlalchemy import and_, select
+
             from db.engine import get_session
             from db.models import MemoryEntry
-            from sqlalchemy import select, and_
 
             session = get_session()
-            threshold = datetime.now(timezone.utc) - timedelta(hours=self.window_hours)
+            threshold = datetime.now(UTC) - timedelta(hours=self.window_hours)
             topic_lower = topic.lower().strip()
 
             stmt = (
@@ -284,7 +288,6 @@ class ResearchDeduplicator:
                 ))
             )
 
-            from sqlalchemy import func
             count = session.execute(stmt).scalar() or 0
             return count > 0
 

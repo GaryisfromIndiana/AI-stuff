@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.scheduler.daemon import SchedulerDaemon, JobConfig
+from core.scheduler.daemon import JobConfig, SchedulerDaemon
 
 
 def test_all_default_jobs_registered():

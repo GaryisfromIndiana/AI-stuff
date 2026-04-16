@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +103,7 @@ class Synthesizer:
         Returns:
             Synthesis with decisions and action items.
         """
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -179,7 +178,7 @@ Respond as JSON:
         Returns:
             UnifiedPlan.
         """
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -254,7 +253,7 @@ Respond as JSON:
         Returns:
             Synthesized output text.
         """
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -305,7 +304,7 @@ Create a unified output that:
         Returns:
             ExecutiveSummary.
         """
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -367,7 +366,7 @@ Respond as JSON:
         Returns:
             List of identified themes.
         """
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -431,7 +430,7 @@ Respond as JSON:
         Returns:
             Prioritized recommendations.
         """
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()
@@ -483,7 +482,7 @@ Respond as JSON:
                 for p in data.get("prioritized", [])
             ]
 
-        except Exception as e:
+        except Exception:
             return [PrioritizedRec(recommendation=r) for r in recommendations]
 
     def resolve_conflicts(self, conflicting_outputs: list[dict]) -> dict:

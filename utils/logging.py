@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 def setup_logging(
@@ -26,6 +25,7 @@ def setup_logging(
     # Clear existing handlers
     root.handlers.clear()
 
+    formatter: logging.Formatter
     if json_format:
         formatter = JsonFormatter()
     else:

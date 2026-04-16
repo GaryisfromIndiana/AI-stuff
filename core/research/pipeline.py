@@ -17,8 +17,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +317,7 @@ class ResearchPipeline:
         stage = PipelineStage(name="DEEPEN")
 
         try:
-            from core.research.deepening import IterativeDeepener, DeepeningCandidate
+            from core.research.deepening import DeepeningCandidate, IterativeDeepener
             deepener = IterativeDeepener(self.empire_id)
 
             # Create a candidate directly for this topic
@@ -356,9 +354,9 @@ class ResearchPipeline:
         stage = PipelineStage(name="SYNTHESIZE")
 
         try:
-            from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
             from core.memory.manager import MemoryManager
+            from llm.base import LLMMessage, LLMRequest
+            from llm.router import ModelRouter, TaskMetadata
 
             router = ModelRouter(self.empire_id)
 

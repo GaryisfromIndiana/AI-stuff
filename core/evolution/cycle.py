@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +166,7 @@ class EvolutionCycleManager:
 
     def _review_proposals(self, proposals: list[dict]) -> list[dict]:
         """Review proposals using an expert model."""
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import ModelRouter, TaskMetadata
 
         router = ModelRouter()
@@ -297,9 +295,10 @@ Respond as JSON:
         added = 0
 
         try:
-            from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
             import json
+
+            from llm.base import LLMMessage, LLMRequest
+            from llm.router import ModelRouter, TaskMetadata
 
             router = ModelRouter()
             request = LLMRequest(
@@ -344,9 +343,9 @@ Respond as JSON:
             return changes
 
         try:
+
+            from llm.base import LLMMessage, LLMRequest
             from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
-            import json
 
             router = ModelRouter()
             request = LLMRequest(

@@ -1,5 +1,21 @@
 """Empire utilities."""
-from utils.logging import setup_logging, get_logger
-from utils.text import truncate, estimate_tokens, format_cost, format_tokens, format_duration
+from utils.logging import get_logger, setup_logging
+from utils.text import (
+    estimate_tokens,
+    format_cost,
+    format_duration,
+    format_tokens,
+    safe_json_loads,
+    truncate,
+)
 
-__all__ = ["setup_logging", "get_logger", "truncate", "estimate_tokens", "format_cost", "format_tokens", "format_duration"]
+__all__ = [
+    "estimate_tokens",
+    "format_cost",
+    "format_duration",
+    "format_tokens",
+    "get_logger",
+    "safe_json_loads",
+    "setup_logging",
+    "truncate",
+]

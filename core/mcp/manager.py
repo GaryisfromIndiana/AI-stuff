@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
 from core.mcp.client import MCPClient, MCPClientError, MCPToolSchema
 
@@ -200,7 +199,6 @@ class MCPManager:
 
     def get_tool_definitions(self):
         """Get ToolDefinition objects for all MCP tools."""
-        from llm.base import ToolDefinition
         tools = self.get_all_tools()
         return [t.to_tool_definition() for t in tools]
 

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -272,8 +271,8 @@ class DirectivePipeline:
             return StageResult(stage=PipelineStage.PLANNING, skipped=True)
 
         try:
-            from core.warroom.session import WarRoomSession
             from core.lieutenant.manager import LieutenantManager
+            from core.warroom.session import WarRoomSession
 
             lt_manager = LieutenantManager(self.empire_id)
             assigned = context.get("assigned_lieutenants", [])

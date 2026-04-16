@@ -6,9 +6,10 @@ import logging
 from functools import wraps
 from urllib.parse import urlparse
 
-from flask import Blueprint, Response, abort, jsonify, request, current_app
-from web.middleware.rate_limit import rate_limit
+from flask import Blueprint, Response, abort, current_app, jsonify, request
+
 from db.engine import repo_scope, session_scope
+from web.middleware.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__)
@@ -123,8 +124,8 @@ def api_create_lieutenant(empire_id):
 def api_lieutenant_task(empire_id, lt_id: str):
     """Submit a task to a lieutenant."""
     data = _get_json_or_400()
-    from core.lieutenant.manager import LieutenantManager
     from core.ace.engine import TaskInput
+    from core.lieutenant.manager import LieutenantManager
     lt = LieutenantManager(empire_id).get_lieutenant(lt_id)
     if not lt:
         return {"error": "Lieutenant not found"}, 404
@@ -221,10 +222,11 @@ def api_directive_progress(empire_id, directive_id: str):
 @empire_route
 def api_directive_report(empire_id, directive_id: str):
     """Get the full output/report from a completed directive."""
+    from sqlalchemy import desc, select
+
+    from db.models import WarRoom
     from db.repositories.directive import DirectiveRepository
     from db.repositories.task import TaskRepository
-    from db.models import WarRoom
-    from sqlalchemy import select, desc
 
     with session_scope() as session:
         dir_repo = DirectiveRepository(session)
@@ -275,8 +277,8 @@ def api_directive_report(empire_id, directive_id: str):
 @empire_route
 def api_latest_reports(empire_id):
     """Get the latest research reports."""
-    from db.repositories.directive import DirectiveRepository
     from core.memory.manager import MemoryManager
+    from db.repositories.directive import DirectiveRepository
 
     with repo_scope(DirectiveRepository) as repo:
         completed = repo.get_completed(empire_id, days=30, limit=10)
@@ -747,7 +749,7 @@ def api_health_debug():
         from llm.anthropic import AnthropicClient
         key = os.environ.get("EMPIRE_ANTHROPIC_API_KEY", "")
         if key:
-            from llm.base import LLMRequest, LLMMessage
+            from llm.base import LLMMessage, LLMRequest
             client = AnthropicClient(key)
             resp = client.complete(LLMRequest(
                 messages=[LLMMessage.user("Say hi in 3 words")],
@@ -1078,7 +1080,7 @@ def api_research_topic(empire_id):
     combined = "\n\n---\n\n".join(source_texts)
 
     # 5. LLM synthesis
-    from llm.base import LLMRequest, LLMMessage
+    from llm.base import LLMMessage, LLMRequest
     from llm.router import ModelRouter, TaskMetadata
 
     router = ModelRouter()

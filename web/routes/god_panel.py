@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 import uuid
-from datetime import datetime, timezone
-from flask import Blueprint, render_template, jsonify, request, current_app
+from datetime import UTC, datetime
+
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 logger = logging.getLogger(__name__)
 god_panel_bp = Blueprint("god_panel", __name__)
@@ -34,7 +34,7 @@ def _track_command(command_id: str, command: str, action: str, topic: str) -> di
         "action": action,
         "topic": topic,
         "status": "accepted",
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
         "completed_at": None,
         "result": None,
         "error": None,
@@ -61,7 +61,7 @@ def _track_command(command_id: str, command: str, action: str, topic: str) -> di
 
 def _complete_command(command_id: str, result: dict | None = None, error: str | None = None) -> None:
     """Mark a command as completed — updates DB and cache."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cost = (result or {}).get("research_cost", 0) or (result or {}).get("cost", 0)
     status = "completed" if not error else "failed"
 
@@ -128,13 +128,13 @@ def god_panel():
     empire_id = current_app.config.get("EMPIRE_ID", "")
 
     try:
-        from db.engine import read_session
-        from db.repositories.empire import EmpireRepository
-        from db.repositories.lieutenant import LieutenantRepository
-        from db.repositories.directive import DirectiveRepository
-        from core.routing.budget import BudgetManager
         from core.knowledge.graph import KnowledgeGraph
         from core.memory.manager import MemoryManager
+        from core.routing.budget import BudgetManager
+        from db.engine import read_session
+        from db.repositories.directive import DirectiveRepository
+        from db.repositories.empire import EmpireRepository
+        from db.repositories.lieutenant import LieutenantRepository
 
         with read_session() as session:
             # All empires in the network
@@ -225,8 +225,8 @@ def execute_command():
         return jsonify({"error": "No command or topic provided"}), 400
 
     try:
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import ModelRouter, TaskMetadata
-        from llm.base import LLMRequest, LLMMessage
         router = ModelRouter(empire_id)
 
         total_cost = 0.0
@@ -268,7 +268,7 @@ def execute_command():
             context_block += f"\n\n## What Empire Already Knows\n{prior_knowledge}"
         if related_entities:
             entity_lines = [f"- {e['name']} ({e['type']}): {e['description']}" for e in related_entities[:5]]
-            context_block += f"\n\n## Related Knowledge Graph Entities\n" + "\n".join(entity_lines)
+            context_block += "\n\n## Related Knowledge Graph Entities\n" + "\n".join(entity_lines)
 
         classify_prompt = (
             "You are the God Panel — the brain of an autonomous AI research system called Empire.\n"
@@ -482,9 +482,10 @@ def list_commands():
     status_filter = request.args.get("status")
 
     try:
+        from sqlalchemy import desc, select
+
         from db.engine import read_session
         from db.models import GodPanelCommand
-        from sqlalchemy import select, desc
 
         with read_session() as session:
             stmt = (
@@ -585,8 +586,8 @@ def trigger_warroom():
                     # Forced topic — run directly
                     from core.warroom.session import WarRoomSession
                     from db.engine import get_session
-                    from db.repositories.lieutenant import LieutenantRepository
                     from db.models import _generate_id
+                    from db.repositories.lieutenant import LieutenantRepository
 
                     session_db = get_session()
                     try:

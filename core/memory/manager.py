@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +95,13 @@ class MemoryManager:
         expires_at = None
         if expires_hours:
             from datetime import timedelta
-            expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_hours)
+            expires_at = datetime.now(UTC) + timedelta(hours=expires_hours)
 
         from db.engine import session_scope
         from db.models import MemoryEntry as MemoryModel
         from db.models import _generate_id
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # All memories are temporal by default — attach transaction time
         enriched_metadata = dict(metadata or {})
@@ -258,8 +258,9 @@ class MemoryManager:
             if not memory_ids:
                 return []
 
-            from db.models import MemoryEntry
             from sqlalchemy import select
+
+            from db.models import MemoryEntry
             entries = list(repo.session.execute(
                 select(MemoryEntry).where(MemoryEntry.id.in_(memory_ids))
             ).scalars().all())
@@ -374,12 +375,13 @@ class MemoryManager:
         Returns:
             Number of memories decayed.
         """
-        from db.engine import session_scope
-        from db.models import MemoryEntry
         from sqlalchemy import select
 
+        from db.engine import session_scope
+        from db.models import MemoryEntry
+
         count = 0
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             with session_scope() as session:
@@ -406,7 +408,7 @@ class MemoryManager:
                     if entry.created_at:
                         created = entry.created_at
                         if created.tzinfo is None:
-                            created = created.replace(tzinfo=timezone.utc)
+                            created = created.replace(tzinfo=UTC)
                         age_days = (now - created).total_seconds() / 86400
                         if age_days > 90:
                             actual_rate *= 2.0
@@ -442,11 +444,12 @@ class MemoryManager:
         Returns:
             Cleanup stats with counts per category.
         """
+        from sqlalchemy import and_, delete
+
         from db.engine import session_scope
         from db.models import MemoryEntry
-        from sqlalchemy import delete, and_
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stats = {}
 
         with session_scope() as session:
@@ -718,7 +721,7 @@ class MemoryManager:
         """
         chars_per_token = 4
         char_budget = token_budget * chars_per_token
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         types = include_types or ["semantic", "experiential", "design", "episodic"]
 
@@ -758,9 +761,8 @@ class MemoryManager:
             if recorded_at:
                 try:
                     # Simple recency: last 24h = +0.3, last week = +0.15, older = 0
-                    from datetime import timedelta
                     rec_dt = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
-                    now_dt = datetime.now(timezone.utc)
+                    now_dt = datetime.now(UTC)
                     age_hours = (now_dt - rec_dt).total_seconds() / 3600
                     if age_hours < 24:
                         recency_boost = 0.3

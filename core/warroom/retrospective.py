@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +120,7 @@ class RetrospectiveEngine:
         Returns:
             Retrospective analysis.
         """
-        from llm.base import LLMRequest, LLMMessage
+        from llm.base import LLMMessage, LLMRequest
         from llm.router import TaskMetadata
 
         router = self._get_router()

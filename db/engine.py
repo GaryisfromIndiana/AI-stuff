@@ -6,14 +6,15 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Any
+from typing import Any
 
-from sqlalchemy import create_engine, event, text, inspect
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker, scoped_session
-from sqlalchemy.pool import StaticPool, NullPool
+from sqlalchemy.orm import Session, scoped_session, sessionmaker
+from sqlalchemy.pool import NullPool, StaticPool
 
 logger = logging.getLogger(__name__)
 
@@ -368,9 +369,10 @@ def _run_constraint_migrations(engine: Engine) -> None:
 def _ensure_default_empire(engine: Engine) -> None:
     """Create the default empire row if it doesn't exist."""
     try:
+        from sqlalchemy.orm import Session as SASession
+
         from config.settings import get_settings
         from db.models import Empire
-        from sqlalchemy.orm import Session as SASession
 
         settings = get_settings()
         empire_id = settings.empire_id

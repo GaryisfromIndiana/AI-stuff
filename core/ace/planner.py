@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
-from llm.base import LLMRequest, LLMMessage
+from llm.base import LLMMessage, LLMRequest
 from llm.router import ModelRouter, TaskMetadata
 from llm.schemas import PlanningOutput, parse_llm_output, safe_json_loads
 

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ class Event:
 
     def __post_init__(self):
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
 
 # Event type constants

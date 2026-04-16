@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
-from llm.base import LLMRequest, LLMMessage
+from llm.base import LLMMessage, LLMRequest
 from llm.router import ModelRouter, TaskMetadata
-from llm.schemas import EntityExtractionOutput, ExtractedEntity, ExtractedRelation, parse_llm_output
+from llm.schemas import EntityExtractionOutput, parse_llm_output
 
 logger = logging.getLogger(__name__)
 

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import secrets
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable
 
-from flask import request, redirect, url_for, session, jsonify, current_app
+from flask import jsonify, redirect, request, session
 
 logger = logging.getLogger(__name__)
 

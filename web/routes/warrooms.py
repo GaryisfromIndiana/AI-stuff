@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from flask import Blueprint, render_template, jsonify, request, current_app
+
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 logger = logging.getLogger(__name__)
 warrooms_bp = Blueprint("warrooms", __name__)
@@ -14,9 +15,10 @@ def list_warrooms():
     """List war room sessions."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
     try:
+        from sqlalchemy import desc, select
+
         from db.engine import read_session
-        from db.models import WarRoom, Lieutenant
-        from sqlalchemy import select, desc
+        from db.models import Lieutenant, WarRoom
 
         with read_session() as session:
             stmt = select(WarRoom).where(WarRoom.empire_id == empire_id).order_by(desc(WarRoom.created_at)).limit(20)
@@ -38,7 +40,7 @@ def warroom_detail(session_id: str):
     """War room session detail."""
     try:
         from db.engine import read_session
-        from db.models import WarRoom, Lieutenant
+        from db.models import Lieutenant, WarRoom
 
         with read_session() as session:
             warroom = session.get(WarRoom, session_id)

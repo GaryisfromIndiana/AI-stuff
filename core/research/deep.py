@@ -88,8 +88,8 @@ def execute_deep_research(
         return result
 
     # ── 3. Final synthesis (merge new + prior) ────────────────────
+    from llm.base import LLMMessage, LLMRequest
     from llm.router import ModelRouter, TaskMetadata
-    from llm.base import LLMRequest, LLMMessage
 
     router = ModelRouter(empire_id)
 
@@ -303,8 +303,8 @@ def execute_autonomous_gap_research(empire_id: str, priority: int = 5) -> dict:
 
         for domain, count in weak:
             try:
+                from llm.base import LLMMessage, LLMRequest
                 from llm.router import ModelRouter, TaskMetadata
-                from llm.base import LLMRequest, LLMMessage
 
                 router = ModelRouter(empire_id)
                 topic_prompt = (

@@ -14,8 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +29,17 @@ class TemporalFact:
     category: str = ""
 
     # Valid time — when is/was this true in the real world?
-    valid_from: Optional[str] = None   # ISO datetime or None (always valid)
-    valid_to: Optional[str] = None     # ISO datetime or None (still valid)
+    valid_from: str | None = None   # ISO datetime or None (always valid)
+    valid_to: str | None = None     # ISO datetime or None (still valid)
 
     # Transaction time — when did Empire record this?
     recorded_at: str = ""       # When Empire first learned this
-    superseded_at: Optional[str] = None  # When a newer version replaced this
+    superseded_at: str | None = None  # When a newer version replaced this
 
     # Versioning
     version: int = 1
-    previous_version_id: Optional[str] = None
-    superseded_by_id: Optional[str] = None
+    previous_version_id: str | None = None
+    superseded_by_id: str | None = None
 
     # Quality
     importance: float = 0.5
@@ -57,8 +56,8 @@ class TemporalFact:
 class TemporalQuery:
     """A query against bi-temporal memory."""
     query: str = ""
-    as_of_valid: Optional[str] = None     # "What was true at this real-world time?"
-    as_of_recorded: Optional[str] = None  # "What did we know at this transaction time?"
+    as_of_valid: str | None = None     # "What was true at this real-world time?"
+    as_of_recorded: str | None = None  # "What did we know at this transaction time?"
     include_superseded: bool = False       # Include facts that have been replaced?
     memory_types: list[str] = field(default_factory=list)
     min_confidence: float = 0.0
@@ -71,7 +70,7 @@ class FactVersion:
     version: int
     content: str
     recorded_at: str
-    superseded_at: Optional[str] = None
+    superseded_at: str | None = None
     confidence: float = 0.8
     source: str = ""
 
@@ -145,11 +144,12 @@ class BiTemporalMemory:
         Returns:
             TemporalFact.
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Single-transaction: find existing, mark superseded, store new — all in one session
         from db.engine import session_scope
-        from db.models import MemoryEntry as MemoryModel, _generate_id
+        from db.models import MemoryEntry as MemoryModel
+        from db.models import _generate_id
 
         superseded_id = None
         prev_version = 0
@@ -159,7 +159,7 @@ class BiTemporalMemory:
             with session_scope() as session:
                 # Find and supersede existing version
                 if title:
-                    from sqlalchemy import select, and_
+                    from sqlalchemy import and_, select
                     stmt = (
                         select(MemoryModel)
                         .where(and_(
@@ -266,9 +266,10 @@ class BiTemporalMemory:
         Returns:
             List of matching TemporalFacts.
         """
+        from sqlalchemy import and_, select
+
         from db.engine import read_session
         from db.models import MemoryEntry
-        from sqlalchemy import select, and_
 
         # Fetch cap: we need tq.limit results AFTER Python-side filtering,
         # so fetch more from DB. Most filtering (superseded, valid_time) happens
@@ -475,7 +476,7 @@ class BiTemporalMemory:
             category = category or old[0].get("category", "")
 
         # Mark the old version as superseded
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         self._mark_superseded(old_fact_id, now)
 
         return self.store_fact(
@@ -520,9 +521,10 @@ class BiTemporalMemory:
 
     def get_temporal_stats(self) -> dict:
         """Get statistics about bi-temporal memory via direct DB counts."""
+        from sqlalchemy import and_, func, select
+
         from db.engine import read_session
         from db.models import MemoryEntry
-        from sqlalchemy import select, func, and_
 
         with read_session() as session:
             base = and_(
@@ -565,9 +567,10 @@ class BiTemporalMemory:
 
         Uses a direct DB query instead of recall() to avoid ILIKE false matches.
         """
+        from sqlalchemy import and_, select
+
         from db.engine import read_session
         from db.models import MemoryEntry
-        from sqlalchemy import select, and_
 
         with read_session() as session:
             stmt = (
@@ -609,7 +612,7 @@ class BiTemporalMemory:
         This is the recommended way for scrapers and research pipelines
         to store new information.
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Check for contradictions — log but don't block
         contradictions = self.find_contradictions(content)

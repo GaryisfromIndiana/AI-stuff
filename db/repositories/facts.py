@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from sqlalchemy import select, func, and_, or_, desc, text
+from sqlalchemy import and_, desc, func, select
 
 from db.models import KnowledgeFact, SourceReliability
 from db.repositories.base import BaseRepository
@@ -92,7 +91,7 @@ class FactsRepository(BaseRepository[KnowledgeFact]):
                 existing.verification_source = verification_source
                 existing.verification_detail = verification_detail
             existing.access_count += 1
-            existing.updated_at = datetime.now(timezone.utc)
+            existing.updated_at = datetime.now(UTC)
             self.session.flush()
             return existing, False
 
@@ -290,7 +289,7 @@ class SourceReliabilityRepository(BaseRepository[SourceReliability]):
         """
         record = self.get_or_create(empire_id, source_name)
         record.total_checks += 1
-        record.last_checked_at = datetime.now(timezone.utc)
+        record.last_checked_at = datetime.now(UTC)
 
         if status == "supported":
             record.supported_count += 1

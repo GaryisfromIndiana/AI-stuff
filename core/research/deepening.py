@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ class IterativeDeepener:
         session = get_session()
         try:
             repo = KnowledgeRepository(session)
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            cutoff = datetime.now(UTC) - timedelta(hours=24)
 
             # Get recently added entities
             all_entities = repo.get_by_empire(self.empire_id, limit=5000)
@@ -194,10 +194,10 @@ class IterativeDeepener:
 
     def _deepen_medium(self, candidate: DeepeningCandidate, result: DeepeningResult) -> DeepeningResult:
         """Medium depth: scrape top sources, detailed extraction, relation mapping."""
-        from core.search.web import WebSearcher
         from core.knowledge.entities import EntityExtractor
         from core.knowledge.graph import KnowledgeGraph
         from core.memory.manager import MemoryManager
+        from core.search.web import WebSearcher
 
         searcher = WebSearcher(self.empire_id)
         extractor = EntityExtractor()
@@ -269,10 +269,10 @@ class IterativeDeepener:
 
     def _deepen_deep(self, candidate: DeepeningCandidate, result: DeepeningResult) -> DeepeningResult:
         """Deep: multi-query research, cross-reference, synthesis, gap filling."""
-        from core.search.web import WebSearcher
         from core.knowledge.entities import EntityExtractor
         from core.knowledge.graph import KnowledgeGraph
         from core.memory.manager import MemoryManager
+        from core.search.web import WebSearcher
 
         searcher = WebSearcher(self.empire_id)
         extractor = EntityExtractor()
@@ -331,8 +331,8 @@ class IterativeDeepener:
         # Synthesize all findings into a comprehensive memory
         if all_summaries:
             try:
+                from llm.base import LLMMessage, LLMRequest
                 from llm.router import ModelRouter, TaskMetadata
-                from llm.base import LLMRequest, LLMMessage
                 router = ModelRouter()
 
                 combined = "\n\n---\n\n".join(s[:2000] for s in all_summaries[:5])
@@ -461,7 +461,7 @@ class IterativeDeepener:
 
     def _recently_deepened(self, topic: str, repo: Any, all_entities: list) -> bool:
         """Check if this topic was deepened within the cooldown window."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=self.COOLDOWN_HOURS)
+        cutoff = datetime.now(UTC) - timedelta(hours=self.COOLDOWN_HOURS)
         topic_lower = topic.lower()
 
         for entity in all_entities:

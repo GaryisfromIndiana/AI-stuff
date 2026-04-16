@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +227,7 @@ class KnowledgeMaintainer:
         with repo_scope(KnowledgeRepository) as repo:
             from sqlalchemy import select
             from sqlalchemy.orm import joinedload
+
             from db.models import KnowledgeEntity
 
             # Eager load outgoing_relations to avoid N+1 queries
@@ -269,8 +269,8 @@ class KnowledgeMaintainer:
         """
         # Use semantic memory to check for contradictions
         try:
-            from core.memory.semantic import SemanticMemory
             from core.memory.manager import MemoryManager
+            from core.memory.semantic import SemanticMemory
             mm = MemoryManager(self.empire_id)
             sm = SemanticMemory(mm)
 
@@ -368,11 +368,13 @@ class KnowledgeMaintainer:
         Returns {topic_lower: task_count} so suggest_gaps can deprioritize
         topics that have already been researched recently.
         """
-        from db.engine import repo_scope
-        from db.repositories.task import TaskRepository
-        from sqlalchemy import select, func, and_
-        from db.models import Task
         from datetime import timedelta
+
+        from sqlalchemy import and_, func, select
+
+        from db.engine import repo_scope
+        from db.models import Task
+        from db.repositories.task import TaskRepository
 
         activity: dict[str, int] = {}
         try:
@@ -428,10 +430,11 @@ class KnowledgeMaintainer:
         Everything else (LLM synthesis, debates, evolution) is internal
         and excluded from gap assessment.
         """
+        from sqlalchemy import func, or_, select
+
         from db.engine import repo_scope
-        from db.repositories.knowledge import KnowledgeRepository
-        from sqlalchemy import select, func, or_
         from db.models import KnowledgeEntity
+        from db.repositories.knowledge import KnowledgeRepository
 
         with repo_scope(KnowledgeRepository) as repo:
             external_filter = or_(
@@ -508,8 +511,8 @@ class KnowledgeMaintainer:
         purged = 0
 
         try:
+            from llm.base import LLMMessage, LLMRequest
             from llm.router import ModelRouter, TaskMetadata
-            from llm.base import LLMRequest, LLMMessage
             router = ModelRouter()
 
             # Batch entities into groups of 5 for efficiency

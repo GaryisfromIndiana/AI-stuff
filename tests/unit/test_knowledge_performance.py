@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from db.repositories.knowledge import KnowledgeRepository
-from db.models import KnowledgeEntity, KnowledgeRelation
 
 
 def test_get_neighbors_batches_entity_lookups() -> None:
@@ -46,8 +45,6 @@ def test_get_neighbors_batches_entity_lookups() -> None:
 def test_prune_low_quality_uses_eager_loading() -> None:
     """Verify prune_low_quality eager loads relations to avoid N+1."""
     
-    from sqlalchemy import select
-    from unittest.mock import ANY
     
     mock_session = MagicMock()
     repo = KnowledgeRepository(mock_session)

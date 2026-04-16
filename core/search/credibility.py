@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -197,9 +197,7 @@ class CredibilityScorer:
         # Determine tier
         if score >= 0.8:
             tier = "authoritative"
-        elif score >= 0.65:
-            tier = "standard"
-        elif score >= 0.45:
+        elif score >= 0.65 or score >= 0.45:
             tier = "standard"
         else:
             tier = "low"

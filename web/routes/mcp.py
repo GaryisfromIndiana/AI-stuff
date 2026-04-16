@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from flask import Blueprint, jsonify, request, current_app
+
+from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger(__name__)
 mcp_bp = Blueprint("mcp", __name__)

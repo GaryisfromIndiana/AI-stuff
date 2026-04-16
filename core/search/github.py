@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-import urllib.request
 import urllib.parse
-from typing import Any
+import urllib.request
 
 logger = logging.getLogger(__name__)
 
