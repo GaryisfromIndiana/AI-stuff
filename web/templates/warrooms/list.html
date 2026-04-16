@@ -1,16 +1,185 @@
 {% extends "base.html" %}
 {% block title %}War Rooms — {{ empire_name }}{% endblock %}
+{% block extra_css %}
+<style>
+    .wr-list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .wr-list-header h1 { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em; color: var(--green); }
+    .wr-list-stats { display: flex; gap: 0.75rem; align-items: center; }
+    .wr-list-stats .badge { font-size: 0.68rem; padding: 0.2rem 0.6rem; }
+    .wr-session-link { color: var(--text); font-family: var(--font-mono); font-size: 0.8rem; }
+    .wr-session-link:hover { color: var(--green); text-decoration: none; }
+    td.mono { font-family: var(--font-mono); font-size: 0.8rem; }
+    .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-right: 0.4rem; animation: pulse-glow 2s ease-in-out infinite; }
+    @keyframes pulse-glow { 0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--green); } 50% { opacity: 0.5; box-shadow: 0 0 8px var(--green); } }
+
+    .btn-new { background: var(--green); color: #0b0f19; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-family: var(--font-mono); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s; }
+    .btn-new:hover { opacity: 0.9; box-shadow: 0 0 10px rgba(52,211,153,0.3); }
+
+    /* Modal */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 200; display: none; align-items: center; justify-content: center; padding: 1rem; }
+    .modal-backdrop.visible { display: flex; }
+    .modal { background: var(--bg-card); border: 1px solid var(--green); border-radius: 10px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
+    .modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h2 { font-family: var(--font-mono); font-size: 0.95rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--green); }
+    .modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; padding: 0; width: 24px; height: 24px; }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 1.25rem; }
+    .modal-field { margin-bottom: 1rem; }
+    .modal-field label { display: block; font-family: var(--font-mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 0.4rem; }
+    .modal-field select, .modal-field input, .modal-field textarea { width: 100%; padding: 0.6rem 0.8rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-mono); font-size: 0.82rem; outline: none; }
+    .modal-field select:focus, .modal-field input:focus, .modal-field textarea:focus { border-color: var(--green); }
+    .modal-field textarea { resize: vertical; min-height: 80px; font-family: var(--font-mono); }
+    .participant-list { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 0.4rem; }
+    .participant-option { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); font-size: 0.78rem; }
+    .participant-option:hover { background: var(--bg-hover); }
+    .participant-option input { width: auto; margin: 0; }
+    .modal-footer { padding: 1rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.5rem; }
+    .modal-btn { padding: 0.55rem 1.1rem; font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+    .modal-btn:hover { border-color: var(--border-glow); }
+    .modal-btn.primary { background: var(--green); color: #0b0f19; border-color: var(--green); }
+    .modal-btn.primary:hover { opacity: 0.9; box-shadow: 0 0 10px rgba(52,211,153,0.3); }
+    .modal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .modal-status { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); margin-right: auto; align-self: center; }
+    .modal-hint { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); margin-top: 0.3rem; }
+</style>
+{% endblock %}
 {% block content %}
-<div class="page-header"><h1>War Rooms</h1><p>Multi-lieutenant planning and debate sessions</p></div>
-<div class="card">
-    <table><thead><tr><th>Session</th><th>Type</th><th>Status</th><th>Participants</th><th>Cost</th><th>Created</th></tr></thead>
-    <tbody>{% for w in warrooms %}<tr>
-        <td><a href="/warrooms/{{ w.id }}">{{ w.id[:12] }}...</a></td>
-        <td><span class="badge badge-blue">{{ w.type }}</span></td>
-        <td><span class="badge {% if w.status == 'closed' %}badge-green{% else %}badge-amber{% endif %}">{{ w.status }}</span></td>
-        <td>{{ w.participants }}</td>
-        <td class="mono">${{ "%.4f"|format(w.cost) }}</td>
-        <td class="text-muted">{{ w.created_at[:16] if w.created_at else '' }}</td>
-    </tr>{% endfor %}</tbody></table>
+<div class="wr-list-header">
+    <div>
+        <h1>War Room</h1>
+        <p class="text-muted" style="font-size: 0.8rem; margin-top: 0.2rem;">Multi-agent debate and planning sessions</p>
+    </div>
+    <div class="wr-list-stats">
+        {% set active = warrooms|selectattr('status', 'ne', 'closed')|list|length %}
+        {% if active > 0 %}<span class="badge badge-green"><span class="pulse"></span>{{ active }} active</span>{% endif %}
+        <span class="badge badge-blue">{{ warrooms|length }} total</span>
+        <button class="btn-new" onclick="openModal()">+ New Session</button>
+    </div>
 </div>
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Participants</th>
+                <th>Cost</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for w in warrooms %}
+            <tr>
+                <td><a href="/warrooms/{{ w.id }}" class="wr-session-link">{% if w.status != 'closed' %}<span class="pulse"></span>{% endif %}{{ w.id[:12] }}...</a></td>
+                <td><span class="badge badge-blue">{{ w.type }}</span></td>
+                <td><span class="badge {% if w.status == 'closed' %}badge-green{% elif w.status == 'debating' %}badge-amber{% else %}badge-purple{% endif %}">{{ w.status }}</span></td>
+                <td class="mono">{{ w.participants }}</td>
+                <td class="mono">${{ "%.4f"|format(w.cost) }}</td>
+                <td class="text-muted mono" style="font-size: 0.75rem;">{{ w.created_at[:16] if w.created_at else '' }}</td>
+            </tr>
+            {% endfor %}
+            {% if not warrooms %}
+            <tr><td colspan="6" class="text-muted" style="text-align: center; padding: 2rem;">No war room sessions yet</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- New Session Modal -->
+<div class="modal-backdrop" id="new-modal" onclick="if(event.target===this) closeModal()">
+    <div class="modal">
+        <div class="modal-header">
+            <h2>New War Room Session</h2>
+            <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-field">
+                <label>Session Type</label>
+                <select id="modal-type">
+                    <option value="debate">Debate</option>
+                    <option value="planning">Planning</option>
+                    <option value="review">Review</option>
+                    <option value="retrospective">Retrospective</option>
+                </select>
+            </div>
+            <div class="modal-field">
+                <label>Participants ({{ active_lieutenants|length }} available)</label>
+                <div class="participant-list" id="participant-list">
+                    {% for lt in active_lieutenants %}
+                    <label class="participant-option">
+                        <input type="checkbox" value="{{ lt.id }}" data-name="{{ lt.name }}">
+                        <span>{{ lt.name }}</span>
+                        <span class="badge badge-purple" style="font-size: 0.58rem; margin-left: auto;">{{ lt.domain }}</span>
+                    </label>
+                    {% endfor %}
+                    {% if not active_lieutenants %}
+                    <div class="text-muted" style="text-align: center; padding: 1rem; font-family: var(--font-mono); font-size: 0.75rem;">No active lieutenants. Activate some first.</div>
+                    {% endif %}
+                </div>
+                <div class="modal-hint">Select 2+ to enable debate. Leave empty to auto-select.</div>
+            </div>
+            <div class="modal-field">
+                <label>Topic (optional — if provided, debate starts immediately)</label>
+                <textarea id="modal-topic" placeholder="e.g. 'Should we prioritize open-weight models in Q2?'"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <span class="modal-status" id="modal-status"></span>
+            <button class="modal-btn" onclick="closeModal()">Cancel</button>
+            <button class="modal-btn primary" id="modal-submit" onclick="submitSession()">Start Session</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openModal() { document.getElementById('new-modal').classList.add('visible'); }
+function closeModal() { document.getElementById('new-modal').classList.remove('visible'); }
+
+function submitSession() {
+    var type = document.getElementById('modal-type').value;
+    var topic = document.getElementById('modal-topic').value.trim();
+    var checks = document.querySelectorAll('#participant-list input[type=checkbox]:checked');
+    var participants = Array.from(checks).map(function(c) { return {id: c.value, name: c.getAttribute('data-name')}; });
+    var status = document.getElementById('modal-status');
+    var btn = document.getElementById('modal-submit');
+
+    status.textContent = topic ? 'Creating session and starting debate (may take a moment)...' : 'Creating session...';
+    status.style.color = 'var(--amber)';
+    btn.disabled = true;
+
+    var payload = {type: type, participants: participants};
+    if (topic) payload.topic = topic;
+
+    fetch('/warrooms/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+    .then(function(res) {
+        btn.disabled = false;
+        if (!res.ok || res.data.error) {
+            status.textContent = 'Error: ' + (res.data.error || 'failed');
+            status.style.color = 'var(--rose)';
+            return;
+        }
+        status.textContent = 'Session created. Redirecting...';
+        status.style.color = 'var(--green)';
+        setTimeout(function() { location.href = '/warrooms/' + res.data.session_id; }, 400);
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        status.textContent = 'Error: ' + err.message;
+        status.style.color = 'var(--rose)';
+    });
+}
+
+// Esc key closes modal
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeModal();
+});
+</script>
 {% endblock %}

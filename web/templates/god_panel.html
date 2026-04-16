@@ -1,148 +1,185 @@
 {% extends "base.html" %}
-{% block title %}God Panel — {{ empire_name }}{% endblock %}
+{% block title %}Command Center — {{ empire_name }}{% endblock %}
+{% block extra_css %}
+<style>
+    .cc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .cc-header h1 { font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15em; color: var(--green); }
+    .cc-header p { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.25rem; font-family: var(--font-mono); }
+    .cc-scheduler { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-mono); font-size: 0.72rem; }
+
+    /* Terminal command input */
+    .cc-terminal { background: var(--bg-dark); border: 1px solid var(--green); border-radius: 8px; padding: 0; margin-bottom: 1.25rem; box-shadow: 0 0 20px rgba(52,211,153,0.08); overflow: hidden; }
+    .cc-terminal-bar { padding: 0.4rem 0.9rem; background: var(--bg-card); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: flex; justify-content: space-between; }
+    .cc-terminal-input { display: flex; align-items: center; padding: 0.5rem 0.9rem; }
+    .cc-terminal-prompt { color: var(--green); font-family: var(--font-mono); font-size: 1rem; font-weight: 700; margin-right: 0.75rem; flex-shrink: 0; }
+    .cc-terminal-input input { flex: 1; background: transparent; border: none; color: var(--text); font-family: var(--font-mono); font-size: 0.95rem; outline: none; padding: 0.5rem 0; caret-color: var(--green); }
+    .cc-terminal-input input::placeholder { color: var(--text-muted); }
+    .cc-terminal-btn { background: var(--green); color: #0b0f19; border: none; padding: 0.5rem 1.25rem; border-radius: 4px; font-family: var(--font-mono); font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; margin-left: 0.75rem; }
+    .cc-terminal-btn:hover { opacity: 0.9; box-shadow: 0 0 10px rgba(52,211,153,0.3); }
+
+    .cc-result { margin-top: 0; border-top: 1px solid var(--border); padding: 0.9rem; background: var(--bg); font-family: var(--font-mono); font-size: 0.8rem; max-height: 400px; overflow-y: auto; display: none; }
+    .cc-result.visible { display: block; }
+    .cc-result pre { white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.5; }
+
+    /* Body grid: stream (2/3) + sidebar (1/3) */
+    .cc-body { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 1.25rem; }
+
+    .cc-card h2 { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .cc-card h2 span.live { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--green); font-size: 0.65rem; }
+    .cc-card h2 span.live::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px var(--green); animation: status-pulse 2s ease-in-out infinite; }
+
+    /* Command stream */
+    .cmd-stream { max-height: 360px; overflow-y: auto; }
+    .cmd-row { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 0.75rem; }
+    .cmd-row:last-child { border-bottom: none; }
+    .cmd-time { color: var(--text-muted); font-size: 0.7rem; width: 52px; flex-shrink: 0; }
+    .cmd-badge { flex-shrink: 0; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .cmd-badge.completed { background: rgba(52,211,153,0.15); color: var(--green); }
+    .cmd-badge.accepted, .cmd-badge.running, .cmd-badge.pending { background: rgba(251,191,36,0.15); color: var(--amber); }
+    .cmd-badge.failed, .cmd-badge.error { background: rgba(251,113,133,0.15); color: var(--rose); }
+    .cmd-text { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cmd-stream-empty { color: var(--text-muted); text-align: center; padding: 1rem; font-family: var(--font-mono); font-size: 0.75rem; }
+
+    /* Fleet */
+    .cc-fleet-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+    .cc-fleet-row:last-child { border-bottom: none; }
+    .cc-fleet-name { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cc-fleet-bar { width: 50px; }
+    .cc-fleet-pct { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); width: 32px; text-align: right; }
+
+    /* Quick actions tiles */
+    .qa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .qa-tile { padding: 0.7rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); text-align: left; transition: all 0.15s; line-height: 1.3; }
+    .qa-tile:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+    .qa-icon { display: inline-block; margin-right: 0.35rem; color: var(--green); }
+
+    .cc-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
+    .cc-stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem; text-align: center; }
+    .cc-stat-value { font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: var(--text); }
+    .cc-stat-value.green { color: var(--green); }
+    .cc-stat-label { font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-top: 0.25rem; }
+
+    @media (max-width: 900px) {
+        .cc-body { grid-template-columns: 1fr; }
+        .cc-stats { grid-template-columns: repeat(2, 1fr); }
+    }
+</style>
+{% endblock %}
 {% block content %}
-<div class="page-header">
-    <h1 style="color: var(--amber); font-size: 1.8rem;">GOD PANEL</h1>
-    <p>One command. Empire handles the rest.</p>
+<div class="cc-header">
+    <div>
+        <h1>Command Center</h1>
+        <p>One command. Empire handles the rest.</p>
+    </div>
+    <div class="cc-scheduler">
+        {% if scheduler.running %}
+        <span class="badge badge-green">● AUTONOMOUS</span>
+        <span class="text-muted">{{ scheduler.ticks }} ticks · {{ scheduler.jobs }} jobs{% if scheduler.errors %} · <span class="text-rose">{{ scheduler.errors }} err</span>{% endif %}</span>
+        {% else %}
+        <span class="badge badge-rose">● STOPPED</span>
+        <button class="detail-btn" onclick="fetch('/scheduler/start',{method:'POST'}).then(()=>location.reload())" style="padding: 0.3rem 0.6rem; font-family: var(--font-mono); font-size: 0.65rem; text-transform: uppercase; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: 4px; cursor: pointer;">Start</button>
+        {% endif %}
+    </div>
 </div>
 
-<!-- ── Command Input ─────────────────────────────────────────────── -->
-<div class="card" style="border-color: var(--amber); margin-bottom: 1.5rem;">
-    <div style="display: flex; gap: 0.75rem;">
-        <input type="text" id="god-command" placeholder="Research the latest breakthroughs in AI agents..."
-            style="flex: 1; padding: 0.8rem 1rem; background: var(--bg); border: 1px solid var(--border-glow);
-                   border-radius: 8px; color: var(--text); font-size: 1rem; font-family: inherit;"
-            onkeypress="if(event.key==='Enter') executeCommand()">
-        <button onclick="executeCommand()"
-            style="padding: 0.8rem 1.5rem; background: var(--amber); color: #0b0f19; border: none;
-                   border-radius: 8px; font-weight: 700; font-size: 0.9rem; cursor: pointer; white-space: nowrap;">
-            Execute
-        </button>
+<!-- Terminal command input -->
+<div class="cc-terminal">
+    <div class="cc-terminal-bar">
+        <span>{{ empire_name }} :: command</span>
+        <span>READY</span>
     </div>
-    <div id="command-status" style="margin-top: 0.75rem; display: none;">
-        <div id="command-loading" style="color: var(--amber); font-size: 0.85rem;">
-            Processing command...
+    <div class="cc-terminal-input">
+        <span class="cc-terminal-prompt">&gt;</span>
+        <input type="text" id="god-command" placeholder="Research the latest breakthroughs in AI agents..." onkeypress="if(event.key==='Enter') executeCommand()" autofocus>
+        <button class="cc-terminal-btn" onclick="executeCommand()">Execute</button>
+    </div>
+    <div class="cc-result" id="command-result"></div>
+</div>
+
+<!-- Body: stream + sidebar -->
+<div class="cc-body">
+    <!-- Command stream (live) -->
+    <div class="card cc-card">
+        <h2>Command Stream <span class="live">LIVE</span></h2>
+        <div class="cmd-stream" id="cmd-stream">
+            <div class="cmd-stream-empty">Loading recent commands...</div>
         </div>
-        <div id="command-result" style="display: none; margin-top: 0.5rem; padding: 0.75rem;
-             background: var(--bg); border-radius: 6px; font-size: 0.85rem; max-height: 400px; overflow-y: auto;">
-        </div>
     </div>
-</div>
 
-<!-- ── Network Overview ──────────────────────────────────────────── -->
-<div class="grid grid-4" style="margin-bottom: 1.5rem;">
-    <div class="card stat">
-        <div class="stat-value text-green">{{ knowledge.entities }}</div>
-        <div class="stat-label">Knowledge Entities</div>
-    </div>
-    <div class="card stat">
-        <div class="stat-value">{{ knowledge.relations }}</div>
-        <div class="stat-label">Relations</div>
-    </div>
-    <div class="card stat">
-        <div class="stat-value">{{ memory.total }}</div>
-        <div class="stat-label">Memories</div>
-    </div>
-    <div class="card stat">
-        <div class="stat-value mono">${{ "%.2f"|format(budget.daily) }}</div>
-        <div class="stat-label">Today's Spend</div>
-    </div>
-</div>
-
-<!-- ── Empire Network + Fleet ────────────────────────────────────── -->
-<div class="grid grid-2" style="margin-bottom: 1rem;">
-    <!-- Fleet -->
-    <div class="card">
-        <h2>Lieutenant Fleet
-            {% if scheduler.running %}
-            <span class="badge badge-green" style="font-size: 0.6rem; margin-left: 0.5rem;">AUTONOMOUS</span>
-            {% endif %}
-        </h2>
-        <div style="margin-top: 0.75rem;">
-        {% for lt in fleet %}
-        <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border);">
-            <div style="width: 130px; font-weight: 500; font-size: 0.85rem;">{{ lt.name[:16] }}</div>
-            <span class="badge badge-purple" style="font-size: 0.6rem; width: 65px; text-align: center;">{{ lt.domain }}</span>
-            <div style="flex: 1;">
-                <div class="progress-bar" style="height: 6px;">
-                    <div class="progress-bar-fill" style="width: {{ (lt.performance * 100)|int }}%; background: {% if lt.performance >= 0.8 %}var(--green){% elif lt.performance >= 0.6 %}var(--amber){% else %}var(--rose){% endif %};"></div>
+    <!-- Sidebar: fleet + quick actions -->
+    <div>
+        <div class="card cc-card" style="margin-bottom: 1rem;">
+            <h2>Fleet Status</h2>
+            {% for lt in fleet %}
+            <div class="cc-fleet-row">
+                <span class="cc-fleet-name">{{ lt.name[:16] }}</span>
+                <span class="badge badge-purple" style="font-size: 0.58rem;">{{ lt.domain[:4] }}</span>
+                <div class="cc-fleet-bar">
+                    <div class="progress-bar" style="height: 5px;">
+                        <div class="progress-bar-fill" style="width: {{ (lt.performance * 100)|int }}%; background: {% if lt.performance >= 0.8 %}var(--green){% elif lt.performance >= 0.6 %}var(--amber){% else %}var(--rose){% endif %};"></div>
+                    </div>
                 </div>
+                <span class="cc-fleet-pct">{{ "%.0f"|format(lt.performance * 100) }}%</span>
             </div>
-            <span class="mono text-muted" style="font-size: 0.72rem; width: 40px;">{{ "%.0f"|format(lt.performance * 100) }}%</span>
-            <span class="mono" style="font-size: 0.72rem; width: 30px;">{{ lt.tasks }}</span>
-        </div>
-        {% endfor %}
-        </div>
-    </div>
-
-    <!-- Quick Actions -->
-    <div class="card">
-        <h2>Quick Actions</h2>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem;">
-            <button onclick="quickCommand('Run an intelligence sweep across all AI sources')"
-                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
-                Intelligence Sweep
-            </button>
-            <button onclick="quickCommand('Trigger an evolution cycle to propose self-improvements')"
-                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
-                Evolution Cycle
-            </button>
-            <button onclick="quickCommand('Audit the knowledge graph for contaminated entities')"
-                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
-                Knowledge Audit
-            </button>
-            <button onclick="quickCommand('Generate a research digest of this weeks findings')"
-                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
-                Weekly Digest
-            </button>
-            <button onclick="quickCommand('Report full system health status')"
-                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
-                System Status
-            </button>
-            <button onclick="quickCommand('Debate: What is the most important AI development this month?')"
-                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
-                War Room Debate
-            </button>
+            {% endfor %}
         </div>
 
-        <h3 style="margin-top: 1.25rem;">Scheduler</h3>
-        <div style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.5rem;">
-            {% if scheduler.running %}
-            <span class="badge badge-green">Running</span>
-            {{ scheduler.ticks }} ticks · {{ scheduler.jobs }} jobs · {{ scheduler.errors }} errors
-            {% else %}
-            <span class="badge badge-rose">Stopped</span>
-            <button onclick="fetch('/scheduler/start',{method:'POST'}).then(()=>location.reload())"
-                class="btn" style="font-size: 0.7rem; padding: 0.2rem 0.5rem; margin-left: 0.5rem;">Start</button>
-            {% endif %}
+        <div class="card cc-card">
+            <h2>Quick Actions</h2>
+            <div class="qa-grid">
+                <button class="qa-tile" onclick="quickCommand('Run an intelligence sweep across all AI sources')"><span class="qa-icon">◆</span>Sweep</button>
+                <button class="qa-tile" onclick="quickCommand('Trigger an evolution cycle to propose self-improvements')"><span class="qa-icon">▲</span>Evolve</button>
+                <button class="qa-tile" onclick="quickCommand('Audit the knowledge graph for contaminated entities')"><span class="qa-icon">◉</span>Audit</button>
+                <button class="qa-tile" onclick="quickCommand('Generate a research digest of this weeks findings')"><span class="qa-icon">≡</span>Digest</button>
+                <button class="qa-tile" onclick="quickCommand('Report full system health status')"><span class="qa-icon">✓</span>Status</button>
+                <button class="qa-tile" onclick="quickCommand('Debate: What is the most important AI development this month?')"><span class="qa-icon">⚔</span>Debate</button>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- ── Active Directives ─────────────────────────────────────────── -->
+<!-- Stats row -->
+<div class="cc-stats">
+    <div class="cc-stat">
+        <div class="cc-stat-value green">{{ knowledge.entities }}</div>
+        <div class="cc-stat-label">Knowledge</div>
+    </div>
+    <div class="cc-stat">
+        <div class="cc-stat-value">{{ knowledge.relations }}</div>
+        <div class="cc-stat-label">Relations</div>
+    </div>
+    <div class="cc-stat">
+        <div class="cc-stat-value">{{ memory.total }}</div>
+        <div class="cc-stat-label">Memories</div>
+    </div>
+    <div class="cc-stat">
+        <div class="cc-stat-value">${{ "%.2f"|format(budget.daily) }}</div>
+        <div class="cc-stat-label">Today's Spend</div>
+    </div>
+</div>
+
 {% if directives.active %}
-<div class="card" style="margin-bottom: 1rem;">
+<div class="card cc-card" style="margin-bottom: 1rem;">
     <h2>Active Directives</h2>
     {% for d in directives.active %}
-    <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border);">
+    <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 0.8rem;">
         <span class="badge badge-blue" style="font-size: 0.6rem;">{{ d.status }}</span>
-        <a href="/directives/{{ d.id }}" style="font-size: 0.85rem;">{{ d.title[:60] }}</a>
+        <a href="/directives/{{ d.id }}" style="color: var(--text);">{{ d.title[:70] }}</a>
     </div>
     {% endfor %}
 </div>
 {% endif %}
 
-<!-- ── Recent Completed ──────────────────────────────────────────── -->
 {% if directives.recent %}
-<div class="card" style="margin-bottom: 1rem;">
+<div class="card cc-card" style="margin-bottom: 1rem;">
     <h2>Recent Completed</h2>
     <table>
         <thead><tr><th>Directive</th><th>Quality</th><th>Cost</th></tr></thead>
         <tbody>
         {% for d in directives.recent[:5] %}
         <tr>
-            <td><a href="/directives/{{ d.id }}">{{ d.title[:50] }}</a></td>
-            <td>{{ "%.0f"|format((d.quality or 0) * 100) }}%</td>
+            <td><a href="/directives/{{ d.id }}">{{ d.title[:60] }}</a></td>
+            <td class="mono">{{ "%.0f"|format((d.quality or 0) * 100) }}%</td>
             <td class="mono">${{ "%.4f"|format(d.cost or 0) }}</td>
         </tr>
         {% endfor %}
@@ -151,9 +188,8 @@
 </div>
 {% endif %}
 
-<!-- ── Empire Network ────────────────────────────────────────────── -->
 {% if empires|length > 1 %}
-<div class="card">
+<div class="card cc-card">
     <h2>Empire Network</h2>
     <table>
         <thead><tr><th>Empire</th><th>Domain</th><th>Status</th><th>Tasks</th><th>Knowledge</th><th>Cost</th></tr></thead>
@@ -163,8 +199,8 @@
             <td style="font-weight: 600;">{{ e.name }}</td>
             <td><span class="badge badge-purple" style="font-size: 0.6rem;">{{ e.domain }}</span></td>
             <td><span class="badge {% if e.status == 'active' %}badge-green{% else %}badge-amber{% endif %}" style="font-size: 0.6rem;">{{ e.status }}</span></td>
-            <td>{{ e.tasks }}</td>
-            <td>{{ e.knowledge }}</td>
+            <td class="mono">{{ e.tasks }}</td>
+            <td class="mono">{{ e.knowledge }}</td>
             <td class="mono">${{ "%.2f"|format(e.cost) }}</td>
         </tr>
         {% endfor %}
@@ -172,72 +208,59 @@
     </table>
 </div>
 {% endif %}
-
 {% endblock %}
 
 {% block extra_js %}
 <script>
+function esc(s) { var d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+
 function executeCommand() {
-    const input = document.getElementById('god-command');
-    const command = input.value.trim();
+    var input = document.getElementById('god-command');
+    var command = input.value.trim();
     if (!command) return;
-
-    const statusDiv = document.getElementById('command-status');
-    const loadingDiv = document.getElementById('command-loading');
-    const resultDiv = document.getElementById('command-result');
-
-    statusDiv.style.display = 'block';
-    loadingDiv.style.display = 'block';
-    loadingDiv.textContent = 'Processing: "' + command + '"...';
-    resultDiv.style.display = 'none';
-
-    function esc(s) {
-        const d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
-    }
+    var resultDiv = document.getElementById('command-result');
+    resultDiv.classList.add('visible');
+    resultDiv.innerHTML = '<div style="color: var(--amber);">Processing: <span class="mono">' + esc(command) + '</span>...</div>';
 
     fetch('/god/command', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({command: command})
     })
-    .then(r => r.json())
-    .then(data => {
-        loadingDiv.style.display = 'none';
-        resultDiv.style.display = 'block';
-
-        let html = '<div style="margin-bottom: 0.5rem;">';
-        html += '<span class="badge badge-blue" style="font-size: 0.7rem;">' + esc(data.action || '?') + '</span> ';
-        html += '<span class="badge ' + (data.status === 'completed' ? 'badge-green' : 'badge-amber') + '" style="font-size: 0.7rem;">' + esc(data.status || '?') + '</span>';
-        if (data.cost) html += ' <span class="mono text-muted" style="font-size: 0.72rem;">$' + data.cost.toFixed(4) + '</span>';
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var html = '<div style="margin-bottom: 0.5rem; display: flex; gap: 0.4rem; align-items: center;">';
+        html += '<span class="badge badge-blue" style="font-size: 0.65rem;">' + esc(data.action || '?') + '</span>';
+        html += '<span class="badge ' + (data.status === 'completed' ? 'badge-green' : 'badge-amber') + '" style="font-size: 0.65rem;">' + esc(data.status || '?') + '</span>';
+        if (data.cost) html += '<span class="mono text-muted" style="font-size: 0.7rem;">$' + data.cost.toFixed(4) + '</span>';
+        if (data.command_id) html += '<span class="mono text-muted" style="font-size: 0.7rem;">id: ' + esc(data.command_id.slice(0,8)) + '</span>';
         html += '</div>';
 
         if (data.synthesis) {
-            html += '<div style="white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5;">' + esc(data.synthesis) + '</div>';
+            html += '<div style="white-space: pre-wrap; font-size: 0.8rem; line-height: 1.55; color: var(--text-secondary);">' + esc(data.synthesis) + '</div>';
         } else if (data.directive_id) {
-            html += '<p>Directive <a href="/directives/' + encodeURIComponent(data.directive_id) + '">' + esc(data.directive_id.slice(0,8)) + '...</a> ' + esc(data.message || 'created') + '</p>';
+            html += '<p>Directive <a href="/directives/' + encodeURIComponent(data.directive_id) + '" style="color: var(--green);">' + esc(data.directive_id.slice(0,8)) + '...</a> ' + esc(data.message || 'created') + '</p>';
         } else if (data.health) {
             html += '<p>Health: <strong>' + esc(data.health.overall_status) + '</strong></p>';
-            (data.health.checks || []).forEach(c => {
-                html += '<div style="font-size: 0.78rem; padding: 0.15rem 0;">' + esc(c.name) + ': ' + esc(c.status) + ' — ' + esc(c.message) + '</div>';
+            (data.health.checks || []).forEach(function(c) {
+                html += '<div style="font-size: 0.75rem; padding: 0.15rem 0;">' + esc(c.name) + ': ' + esc(c.status) + ' — ' + esc(c.message) + '</div>';
             });
         } else if (data.audit) {
-            html += '<p>Audited: ' + esc(String(data.audit.audited)) + ', Flagged: ' + esc(String(data.audit.flagged)) + ', Purged: ' + esc(String(data.audit.purged)) + '</p>';
+            html += '<p>Audited: ' + esc(data.audit.audited) + ', Flagged: ' + esc(data.audit.flagged) + ', Purged: ' + esc(data.audit.purged) + '</p>';
         } else if (data.research) {
-            html += '<p>Sources: ' + esc(String(data.research.sources || 0)) + '</p>';
+            html += '<p>Sources: ' + esc(data.research.sources || 0) + '</p>';
         } else if (data.error) {
             html += '<p style="color: var(--rose);">Error: ' + esc(data.error) + '</p>';
+        } else if (data.message) {
+            html += '<p>' + esc(data.message) + '</p>';
         } else {
-            html += '<pre style="font-size: 0.75rem;">' + esc(JSON.stringify(data, null, 2)) + '</pre>';
+            html += '<pre>' + esc(JSON.stringify(data, null, 2)) + '</pre>';
         }
-
         resultDiv.innerHTML = html;
         input.value = '';
+        refreshStream();
     })
-    .catch(err => {
-        loadingDiv.style.display = 'none';
-        resultDiv.style.display = 'block';
+    .catch(function(err) {
         resultDiv.innerHTML = '<p style="color: var(--rose);">Error: ' + esc(err.message) + '</p>';
     });
 }
@@ -246,5 +269,35 @@ function quickCommand(cmd) {
     document.getElementById('god-command').value = cmd;
     executeCommand();
 }
+
+function refreshStream() {
+    fetch('/god/commands?limit=15')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var stream = document.getElementById('cmd-stream');
+            var cmds = data.commands || data || [];
+            if (!cmds.length) { stream.innerHTML = '<div class="cmd-stream-empty">No commands yet. Execute one above.</div>'; return; }
+            var html = '';
+            cmds.forEach(function(c) {
+                var t = c.created_at || c.timestamp || '';
+                var tm = t ? t.slice(11, 19) : '';
+                var st = (c.status || 'pending').toLowerCase();
+                var txt = c.command || c.command_text || c.action || '(no text)';
+                html += '<div class="cmd-row">';
+                html += '<span class="cmd-time">' + esc(tm) + '</span>';
+                html += '<span class="cmd-badge ' + esc(st) + '">' + esc(st) + '</span>';
+                html += '<span class="cmd-text" title="' + esc(txt) + '">' + esc(String(txt).slice(0,100)) + '</span>';
+                html += '</div>';
+            });
+            stream.innerHTML = html;
+        })
+        .catch(function() {
+            var stream = document.getElementById('cmd-stream');
+            if (stream.innerHTML.indexOf('Loading') !== -1) stream.innerHTML = '<div class="cmd-stream-empty">Unable to load stream</div>';
+        });
+}
+
+refreshStream();
+setInterval(refreshStream, 3000);
 </script>
 {% endblock %}

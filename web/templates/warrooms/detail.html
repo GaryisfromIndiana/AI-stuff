@@ -1,33 +1,313 @@
 {% extends "base.html" %}
 {% block title %}War Room — {{ empire_name }}{% endblock %}
+{% block body_class %}warroom-page{% endblock %}
+{% block extra_css %}
+<style>
+    .wr-layout { display: flex; flex-direction: column; height: calc(100vh - 52px); overflow: hidden; }
+
+    /* Header */
+    .wr-header { padding: 0.75rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--bg-card); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    .wr-header h1 { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em; color: var(--green); }
+    .wr-header-meta { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.2rem; }
+    .wr-header-right { display: flex; align-items: center; gap: 0.5rem; }
+
+    /* Tabs */
+    .wr-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg-card); padding: 0 1.5rem; flex-shrink: 0; }
+    .wr-tab { padding: 0.6rem 1.25rem; font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; user-select: none; }
+    .wr-tab:hover { color: var(--text); }
+    .wr-tab.active { color: var(--green); border-bottom-color: var(--green); }
+
+    /* Body: chat + sidebar */
+    .wr-body { display: flex; flex: 1; overflow: hidden; }
+
+    /* Chat area */
+    .wr-chat { flex: 1; overflow-y: auto; padding: 1rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
+
+    /* Chat messages */
+    .chat-msg { padding: 0.75rem 1rem; border-left: 3px solid var(--border); background: rgba(17,24,39,0.4); border-radius: 0 6px 6px 0; }
+    .chat-msg[data-type="statement"] { border-left-color: var(--blue); }
+    .chat-msg[data-type="proposal"] { border-left-color: var(--green); }
+    .chat-msg[data-type="rebuttal"] { border-left-color: var(--rose); }
+    .chat-msg[data-type="question"] { border-left-color: var(--amber); }
+    .chat-msg[data-type="synthesis"] { border-left-color: var(--purple); }
+    .chat-msg-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+    .chat-msg-name { font-family: var(--font-mono); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .chat-msg-time { font-family: var(--font-mono); font-size: 0.62rem; color: var(--text-muted); }
+    .chat-msg-badge { font-size: 0.58rem; padding: 0.1rem 0.4rem; }
+    .chat-msg-content { font-size: 0.85rem; line-height: 1.65; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+
+    /* Briefing content */
+    .briefing-section { margin-bottom: 1.5rem; }
+    .briefing-section h2 { font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--green); margin-bottom: 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+    .briefing-section p { font-size: 0.88rem; line-height: 1.7; color: var(--text-secondary); }
+    .briefing-section ul { list-style: none; padding: 0; }
+    .briefing-section li { padding: 0.4rem 0; padding-left: 1rem; border-left: 2px solid var(--border); margin-bottom: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); }
+    .briefing-section li::before { content: none; }
+
+    /* Action items */
+    .action-item { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+    .action-item:last-child { border-bottom: none; }
+
+    /* Right sidebar */
+    .wr-sidebar { width: 280px; border-left: 1px solid var(--border); background: var(--bg-card); padding: 1.25rem; overflow-y: auto; flex-shrink: 0; }
+    .wr-sidebar-section { margin-bottom: 1.5rem; }
+    .wr-sidebar-section h3 { font-family: var(--font-mono); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-muted); margin-bottom: 0.6rem; }
+    .wr-sidebar-section p { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
+    .wr-sidebar-section .mono { font-size: 0.78rem; }
+    .wr-participant { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; }
+    .wr-participant-name { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; }
+    .wr-participant-domain { font-size: 0.6rem; }
+    .wr-topic { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5; padding: 0.5rem; background: var(--bg-hover); border-radius: 6px; border-left: 3px solid var(--green); }
+
+    /* Consensus bar */
+    .consensus-bar { margin-top: 0.5rem; }
+    .consensus-bar .progress-bar { height: 8px; }
+    .consensus-label { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+    /* Chat input */
+    .wr-input { padding: 0.75rem 1.5rem; border-top: 1px solid var(--border); background: var(--bg-card); display: flex; gap: 0.75rem; flex-shrink: 0; }
+    .wr-input input { flex: 1; padding: 0.65rem 1rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-mono); font-size: 0.82rem; outline: none; }
+    .wr-input input:focus { border-color: var(--green); }
+    .wr-input input::placeholder { color: var(--text-muted); }
+    .wr-input button { background: var(--green); color: #0b0f19; border: none; padding: 0.65rem 1.5rem; border-radius: 6px; font-family: var(--font-mono); font-weight: 700; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s; }
+    .wr-input button:hover { opacity: 0.9; box-shadow: 0 0 10px rgba(52,211,153,0.3); }
+
+    /* Empty state */
+    .wr-empty { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
+    .wr-empty h2 { font-family: var(--font-mono); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem; }
+
+    @media (max-width: 768px) {
+        .wr-sidebar { display: none; }
+        .wr-header { padding: 0.5rem 1rem; }
+        .wr-chat { padding: 0.75rem 1rem; }
+        .wr-input { padding: 0.5rem 1rem; }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="page-header"><h1>War Room Session</h1>
-    <p><span class="badge badge-blue">{{ warroom.type }}</span> <span class="badge {% if warroom.status == 'closed' %}badge-green{% else %}badge-amber{% endif %}">{{ warroom.status }}</span></p>
+<div class="wr-layout">
+    <!-- Header -->
+    <div class="wr-header">
+        <div>
+            <h1>War Room</h1>
+            <div class="wr-header-meta">
+                <span class="mono text-muted" style="font-size: 0.7rem;">{{ warroom.id[:12] }}</span>
+                <span class="badge badge-blue">{{ warroom.type }}</span>
+                <span class="badge {% if warroom.status == 'closed' %}badge-green{% elif warroom.status == 'debating' %}badge-amber{% else %}badge-purple{% endif %}">{{ warroom.status }}</span>
+            </div>
+        </div>
+        <div class="wr-header-right">
+            <span class="mono text-muted" style="font-size: 0.75rem;">${{ "%.4f"|format(warroom.cost or 0) }}</span>
+            {% if warroom.round_count %}
+            <span class="badge badge-purple">{{ warroom.round_count }} rounds</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="wr-tabs">
+        <div class="wr-tab active" onclick="switchTab('transcript', this)">War Room</div>
+        <div class="wr-tab" onclick="switchTab('briefing', this)">Briefing</div>
+        <div class="wr-tab" onclick="switchTab('strategizing', this)">Strategizing</div>
+    </div>
+
+    <!-- Body -->
+    <div class="wr-body">
+        <!-- TAB: WAR ROOM (transcript) -->
+        <div class="wr-chat" id="tab-transcript">
+            {% if warroom.transcript %}
+                {% for msg in warroom.transcript %}
+                <div class="chat-msg" data-type="{{ msg.get('message_type', msg.get('type', 'statement')) }}">
+                    <div class="chat-msg-header">
+                        <span class="chat-msg-name" data-speaker="{{ msg.get('speaker_name', 'Unknown') }}">{{ msg.get('speaker_name', 'Unknown') }}</span>
+                        <span class="badge chat-msg-badge badge-{{ {'statement':'blue','proposal':'green','rebuttal':'rose','question':'amber','synthesis':'purple'}.get(msg.get('message_type', msg.get('type', 'statement')), 'blue') }}">{{ msg.get('message_type', msg.get('type', 'statement')) }}</span>
+                        <span class="chat-msg-time">{{ msg.get('timestamp', '')[:19] }}</span>
+                    </div>
+                    <div class="chat-msg-content">{{ msg.get('content', '') }}</div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="wr-empty">
+                    <h2>No Transcript</h2>
+                    <p>This session has no messages yet.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- TAB: BRIEFING (synthesis) -->
+        <div class="wr-chat" id="tab-briefing" style="display: none;">
+            {% if warroom.synthesis %}
+                {% if warroom.synthesis.get('summary') %}
+                <div class="briefing-section">
+                    <h2>Summary</h2>
+                    <p>{{ warroom.synthesis.summary }}</p>
+                </div>
+                {% endif %}
+                {% if warroom.synthesis.get('decisions') %}
+                <div class="briefing-section">
+                    <h2>Decisions</h2>
+                    <ul>{% for d in warroom.synthesis.decisions %}<li>{{ d }}</li>{% endfor %}</ul>
+                </div>
+                {% endif %}
+                {% if warroom.synthesis.get('key_insights') %}
+                <div class="briefing-section">
+                    <h2>Key Insights</h2>
+                    <ul>{% for i in warroom.synthesis.key_insights %}<li>{{ i }}</li>{% endfor %}</ul>
+                </div>
+                {% endif %}
+                {% if warroom.synthesis.get('dissenting_views') %}
+                <div class="briefing-section">
+                    <h2>Dissenting Views</h2>
+                    <ul>{% for v in warroom.synthesis.dissenting_views %}<li>{{ v }}</li>{% endfor %}</ul>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="wr-empty">
+                    <h2>No Briefing</h2>
+                    <p>Synthesis will appear here once the debate concludes.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- TAB: STRATEGIZING (action items) -->
+        <div class="wr-chat" id="tab-strategizing" style="display: none;">
+            {% if warroom.action_items %}
+                <div class="briefing-section">
+                    <h2>Action Items</h2>
+                    {% for ai in warroom.action_items %}
+                    <div class="action-item">
+                        <span class="badge {% if ai.get('priority') == 'high' %}badge-rose{% elif ai.get('priority') == 'low' %}badge-blue{% else %}badge-amber{% endif %}">{{ ai.get('priority', 'medium') }}</span>
+                        <div>
+                            <p style="font-size: 0.85rem;">{{ ai.get('description', '') }}</p>
+                            {% if ai.get('assigned_to') %}
+                            <span class="mono text-muted" style="font-size: 0.72rem;">Assigned: {{ ai.assigned_to }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="wr-empty">
+                    <h2>No Action Items</h2>
+                    <p>Strategic action items will appear here.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Right Sidebar -->
+        <div class="wr-sidebar">
+            <div class="wr-sidebar-section">
+                <h3>Session Info</h3>
+                <p><strong>Type:</strong> <span class="mono">{{ warroom.type }}</span></p>
+                <p><strong>Status:</strong> <span class="mono">{{ warroom.status }}</span></p>
+                <p><strong>Cost:</strong> <span class="mono">${{ "%.4f"|format(warroom.cost or 0) }}</span></p>
+                {% if warroom.round_count %}
+                <p><strong>Rounds:</strong> <span class="mono">{{ warroom.round_count }}</span></p>
+                {% endif %}
+                {% if warroom.created_at %}
+                <p><strong>Started:</strong> <span class="mono" style="font-size: 0.7rem;">{{ warroom.created_at[:16] }}</span></p>
+                {% endif %}
+            </div>
+
+            {% if warroom.debate_topic %}
+            <div class="wr-sidebar-section">
+                <h3>Debate Topic</h3>
+                <div class="wr-topic">{{ warroom.debate_topic }}</div>
+            </div>
+            {% endif %}
+
+            {% if warroom.consensus_score is not none %}
+            <div class="wr-sidebar-section">
+                <h3>Consensus</h3>
+                <div class="consensus-bar">
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" style="width: {{ (warroom.consensus_score or 0) * 100 }}%; background: {% if (warroom.consensus_score or 0) >= 0.7 %}var(--green){% elif (warroom.consensus_score or 0) >= 0.4 %}var(--amber){% else %}var(--rose){% endif %};"></div>
+                    </div>
+                    <div class="consensus-label">{{ "%.0f"|format((warroom.consensus_score or 0) * 100) }}% consensus{% if warroom.consensus_reached %} (reached){% endif %}</div>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="wr-sidebar-section">
+                <h3>Participants ({{ warroom.participants|length }})</h3>
+                {% for p in warroom.participants %}
+                <div class="wr-participant">
+                    {% if p is mapping %}
+                    <span class="wr-participant-name">{{ p.get('name', p.get('id', 'Unknown')[:12]) }}</span>
+                    {% if p.get('domain') and p.domain != 'unknown' %}
+                    <span class="badge wr-participant-domain badge-purple">{{ p.domain }}</span>
+                    {% endif %}
+                    {% else %}
+                    <span class="wr-participant-name">{{ p }}</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                {% if not warroom.participants %}
+                <p class="text-muted" style="font-size: 0.78rem;">No participants</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Input -->
+    <div class="wr-input">
+        <input type="text" placeholder="Ask PAUL's agents anything..." id="wr-cmd" onkeydown="if(event.key==='Enter')sendCmd()">
+        <button onclick="sendCmd()">SEND</button>
+    </div>
 </div>
-<div class="grid grid-2">
-    <div class="card"><h2>Participants</h2>{% for p in warroom.get('participants', []) %}<p>{{ p }}</p>{% endfor %}</div>
-    <div class="card"><h2>Cost</h2><p class="stat-value mono">${{ "%.4f"|format(warroom.cost) }}</p></div>
-</div>
-{% if warroom.get('synthesis') %}
-<div class="card"><h2>Synthesis</h2>
-    {% if warroom.synthesis.get('summary') %}<p>{{ warroom.synthesis.summary }}</p>{% endif %}
-    {% if warroom.synthesis.get('decisions') %}<h3>Decisions</h3><ul>{% for d in warroom.synthesis.decisions %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}
-</div>
-{% endif %}
-{% if warroom.get('action_items') %}
-<div class="card"><h2>Action Items</h2>
-    {% for ai in warroom.action_items %}<div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-        <span class="badge {% if ai.get('priority') == 'high' %}badge-rose{% else %}badge-amber{% endif %}">{{ ai.get('priority', 'medium') }}</span>
-        {{ ai.get('description', '') }}
-    </div>{% endfor %}
-</div>
-{% endif %}
-{% if warroom.get('transcript') %}
-<div class="card"><h2>Transcript</h2>
-    {% for msg in warroom.transcript[-20:] %}<div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-        <strong>{{ msg.get('speaker_name', 'Unknown') }}</strong> <span class="text-muted mono" style="font-size: 0.7rem;">{{ msg.get('timestamp', '')[:19] }}</span>
-        <p style="margin-top: 0.25rem;">{{ msg.get('content', '')[:500] }}</p>
-    </div>{% endfor %}
-</div>
-{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function switchTab(tab, el) {
+    document.querySelectorAll('.wr-chat').forEach(function(c) { c.style.display = 'none'; });
+    document.querySelectorAll('.wr-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById('tab-' + tab).style.display = 'flex';
+    el.classList.add('active');
+}
+
+function sendCmd() {
+    var input = document.getElementById('wr-cmd');
+    var cmd = input.value.trim();
+    if (!cmd) return;
+    input.disabled = true;
+    fetch('/god/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({command: cmd})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        input.value = '';
+        input.disabled = false;
+        input.focus();
+        if (data.command_id) {
+            var notice = document.createElement('div');
+            notice.className = 'chat-msg';
+            notice.setAttribute('data-type', 'statement');
+            notice.innerHTML = '<div class="chat-msg-header"><span class="chat-msg-name" style="color:var(--amber);">SYSTEM</span><span class="chat-msg-time">' + new Date().toISOString().slice(0,19) + '</span></div><div class="chat-msg-content">Command accepted (ID: ' + data.command_id.slice(0,12) + '). Processing...</div>';
+            document.getElementById('tab-transcript').appendChild(notice);
+            document.getElementById('tab-transcript').scrollTop = document.getElementById('tab-transcript').scrollHeight;
+        }
+    })
+    .catch(function() { input.disabled = false; });
+}
+
+// Auto-scroll chat to bottom
+document.addEventListener('DOMContentLoaded', function() {
+    var chat = document.getElementById('tab-transcript');
+    if (chat) chat.scrollTop = chat.scrollHeight;
+
+    // Assign unique colors to speakers
+    var colors = ['var(--blue)', 'var(--green)', 'var(--amber)', 'var(--rose)', 'var(--purple)', 'var(--cyan)'];
+    var map = {};
+    var idx = 0;
+    document.querySelectorAll('.chat-msg-name[data-speaker]').forEach(function(el) {
+        var name = el.getAttribute('data-speaker');
+        if (!map[name]) { map[name] = colors[idx % colors.length]; idx++; }
+        el.style.color = map[name];
+    });
+});
+</script>
 {% endblock %}

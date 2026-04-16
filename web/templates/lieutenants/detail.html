@@ -1,14 +1,78 @@
 {% extends "base.html" %}
 {% block title %}{{ lieutenant.name }} — {{ empire_name }}{% endblock %}
+{% block extra_css %}
+<style>
+    .agent-detail-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .detail-avatar { width: 56px; height: 56px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-weight: 800; font-size: 1.5rem; text-transform: uppercase; flex-shrink: 0; }
+    .detail-avatar.domain-models { background: rgba(56,189,248,0.2); color: var(--blue); border: 1px solid var(--blue); }
+    .detail-avatar.domain-research { background: rgba(52,211,153,0.2); color: var(--green); border: 1px solid var(--green); }
+    .detail-avatar.domain-agents { background: rgba(167,139,250,0.2); color: var(--purple); border: 1px solid var(--purple); }
+    .detail-avatar.domain-tooling { background: rgba(251,191,36,0.2); color: var(--amber); border: 1px solid var(--amber); }
+    .detail-avatar.domain-industry { background: rgba(251,113,133,0.2); color: var(--rose); border: 1px solid var(--rose); }
+    .detail-avatar.domain-open_source { background: rgba(34,211,238,0.2); color: var(--cyan); border: 1px solid var(--cyan); }
+    .detail-avatar.domain-default { background: rgba(100,116,139,0.2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    .detail-title { flex: 1; }
+    .detail-title h1 { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text); }
+    .detail-meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
+
+    .detail-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+    .detail-btn { padding: 0.5rem 1rem; font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); cursor: pointer; transition: all 0.15s; text-decoration: none; }
+    .detail-btn:hover { border-color: var(--green); color: var(--green); text-decoration: none; }
+    .detail-btn.primary { background: var(--green); color: #0b0f19; border-color: var(--green); }
+    .detail-btn.primary:hover { opacity: 0.9; box-shadow: 0 0 10px rgba(52,211,153,0.3); color: #0b0f19; }
+    .detail-btn.danger { color: var(--rose); border-color: var(--rose); }
+    .detail-btn.danger:hover { background: rgba(251,113,133,0.1); color: var(--rose); }
+
+    .research-panel { background: var(--bg-card); border: 1px solid var(--green); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; display: none; }
+    .research-panel.visible { display: block; }
+    .research-panel h3 { font-family: var(--font-mono); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--green); margin-bottom: 0.75rem; }
+    .research-row { display: flex; gap: 0.5rem; }
+    .research-row input { flex: 1; padding: 0.6rem 0.9rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-mono); font-size: 0.85rem; outline: none; }
+    .research-row input:focus { border-color: var(--green); }
+    .research-status { margin-top: 0.5rem; font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); }
+
+    .card h2 { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+    .persona-row { display: flex; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .persona-row:last-child { border-bottom: none; }
+    .persona-row strong { font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); width: 100px; flex-shrink: 0; }
+    .expertise-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+    .expertise-tag { padding: 0.2rem 0.5rem; background: var(--bg-hover); border-radius: 3px; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-secondary); }
+</style>
+{% endblock %}
 {% block content %}
-<div class="page-header">
-    <h1>{{ lieutenant.name }}</h1>
-    <p>{{ lieutenant.domain }} • <span class="badge {% if lieutenant.status == 'active' %}badge-green{% else %}badge-amber{% endif %}">{{ lieutenant.status }}</span></p>
+{% set domain_class = 'domain-' + lieutenant.domain if lieutenant.domain in ['models','research','agents','tooling','industry','open_source'] else 'domain-default' %}
+
+<div class="agent-detail-header">
+    <div class="detail-avatar {{ domain_class }}">{{ lieutenant.name[0] }}</div>
+    <div class="detail-title">
+        <h1>{{ lieutenant.name }}</h1>
+        <div class="detail-meta">
+            <span class="badge badge-purple">{{ lieutenant.domain }}</span>
+            <span class="badge {% if lieutenant.status == 'active' %}badge-green{% else %}badge-amber{% endif %}">{{ lieutenant.status }}</span>
+            <span class="mono text-muted" style="font-size: 0.7rem;">{{ lieutenant.id[:12] }}</span>
+        </div>
+    </div>
+    <div class="detail-actions">
+        <button class="detail-btn primary" onclick="toggleResearch()">Start Research</button>
+        <button class="detail-btn" onclick="toggleActive('{{ lieutenant.id }}', '{{ lieutenant.status }}')">{% if lieutenant.status == 'active' %}Deactivate{% else %}Activate{% endif %}</button>
+        <button class="detail-btn danger" onclick="deleteAgent('{{ lieutenant.id }}', '{{ lieutenant.name }}')">Delete</button>
+    </div>
+</div>
+
+<div class="research-panel" id="research-panel">
+    <h3>Start Research Task</h3>
+    <div class="research-row">
+        <input type="text" id="research-topic" placeholder="Topic — e.g. 'latest reasoning model benchmarks'" onkeydown="if(event.key==='Enter') startResearch('{{ lieutenant.id }}')">
+        <button class="detail-btn primary" onclick="startResearch('{{ lieutenant.id }}')">Go</button>
+        <button class="detail-btn" onclick="toggleResearch()">Cancel</button>
+    </div>
+    <div class="research-status" id="research-status"></div>
 </div>
 
 <div class="grid grid-4" style="margin-bottom: 1.5rem;">
     <div class="card stat">
-        <div class="stat-value">{{ "%.2f"|format(lieutenant.performance) }}</div>
+        <div class="stat-value">{{ "%.0f"|format(lieutenant.performance * 100) }}%</div>
         <div class="stat-label">Performance</div>
     </div>
     <div class="card stat">
@@ -16,7 +80,7 @@
         <div class="stat-label">Completed</div>
     </div>
     <div class="card stat">
-        <div class="stat-value text-rose">{{ lieutenant.tasks_failed }}</div>
+        <div class="stat-value {% if lieutenant.tasks_failed > 0 %}text-rose{% endif %}">{{ lieutenant.tasks_failed }}</div>
         <div class="stat-label">Failed</div>
     </div>
     <div class="card stat">
@@ -29,38 +93,90 @@
     <div class="card">
         <h2>Persona</h2>
         {% if lieutenant.persona %}
-        <p><strong>Role:</strong> {{ lieutenant.persona.get('role', 'N/A') }}</p>
-        <p><strong>Style:</strong> {{ lieutenant.persona.get('communication_style', 'N/A') }}</p>
-        <p><strong>Approach:</strong> {{ lieutenant.persona.get('analysis_approach', 'N/A') }}</p>
-        <p><strong>Expertise:</strong> {{ lieutenant.persona.get('expertise_areas', [])|join(', ') }}</p>
+        <div class="persona-row"><strong>Role</strong><span>{{ lieutenant.persona.get('role', 'N/A') }}</span></div>
+        <div class="persona-row"><strong>Style</strong><span>{{ lieutenant.persona.get('communication_style', 'N/A') }}</span></div>
+        <div class="persona-row"><strong>Approach</strong><span>{{ lieutenant.persona.get('analysis_approach', 'N/A') }}</span></div>
+        {% if lieutenant.persona.get('expertise_areas') %}
+        <div class="persona-row" style="flex-direction: column; align-items: flex-start;">
+            <strong style="margin-bottom: 0.3rem;">Expertise</strong>
+            <div class="expertise-tags">
+                {% for area in lieutenant.persona.expertise_areas %}
+                <span class="expertise-tag">{{ area }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
         {% endif %}
     </div>
     <div class="card">
         <h2>Task Statistics</h2>
         {% if task_stats %}
-        <p><strong>Total:</strong> {{ task_stats.get('total_tasks', 0) }}</p>
-        <p><strong>Avg Quality:</strong> {{ "%.2f"|format(task_stats.get('avg_quality', 0)) }}</p>
-        <p><strong>Avg Time:</strong> {{ "%.1f"|format(task_stats.get('avg_execution_time', 0)) }}s</p>
-        <p><strong>Total Cost:</strong> ${{ "%.4f"|format(task_stats.get('total_cost', 0)) }}</p>
+        <div class="persona-row"><strong>Total</strong><span class="mono">{{ task_stats.get('total_tasks', 0) }}</span></div>
+        <div class="persona-row"><strong>Avg Quality</strong><span class="mono">{{ "%.2f"|format(task_stats.get('avg_quality', 0)) }}</span></div>
+        <div class="persona-row"><strong>Avg Time</strong><span class="mono">{{ "%.1f"|format(task_stats.get('avg_execution_time', 0)) }}s</span></div>
+        <div class="persona-row"><strong>Total Cost</strong><span class="mono">${{ "%.4f"|format(task_stats.get('total_cost', 0)) }}</span></div>
         {% endif %}
     </div>
 </div>
 
-{% if cost_breakdown %}
+{% if cost_breakdown and cost_breakdown.get('by_model') %}
 <div class="card" style="margin-top: 1rem;">
-    <h2>Cost Breakdown</h2>
+    <h2>Cost Breakdown by Model</h2>
     <table>
         <thead><tr><th>Model</th><th>Cost</th><th>Requests</th></tr></thead>
         <tbody>
-        {% for model, data in cost_breakdown.get('by_model', {}).items() %}
+        {% for model, data in cost_breakdown.by_model.items() %}
         <tr>
             <td class="mono">{{ model }}</td>
             <td class="mono">${{ "%.4f"|format(data.cost) }}</td>
-            <td>{{ data.count }}</td>
+            <td class="mono">{{ data.count }}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleResearch() {
+    var p = document.getElementById('research-panel');
+    p.classList.toggle('visible');
+    if (p.classList.contains('visible')) document.getElementById('research-topic').focus();
+}
+
+function startResearch(id) {
+    var input = document.getElementById('research-topic');
+    var status = document.getElementById('research-status');
+    var topic = input.value.trim();
+    if (!topic) { status.textContent = 'Enter a topic first.'; status.style.color = 'var(--rose)'; return; }
+    status.textContent = 'Dispatching research task...'; status.style.color = 'var(--amber)';
+    input.disabled = true;
+    fetch('/lieutenants/' + id + '/research', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({topic: topic, depth: 'standard'})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        input.disabled = false;
+        if (data.error) { status.textContent = 'Error: ' + data.error; status.style.color = 'var(--rose)'; }
+        else { status.textContent = 'Research complete. Reload to see updated stats.'; status.style.color = 'var(--green)'; input.value = ''; }
+    })
+    .catch(function(err) { input.disabled = false; status.textContent = 'Error: ' + err.message; status.style.color = 'var(--rose)'; });
+}
+
+function toggleActive(id, currentStatus) {
+    var action = currentStatus === 'active' ? 'deactivate' : 'activate';
+    fetch('/lieutenants/' + id + '/' + action, {method: 'POST'})
+        .then(function(r) { if (r.ok) location.reload(); });
+}
+
+function deleteAgent(id, name) {
+    if (!confirm('Delete agent "' + name + '"? This cannot be undone.')) return;
+    fetch('/lieutenants/' + id + '/delete', {method: 'DELETE'})
+        .then(function(r) { if (r.ok) location.href = '/lieutenants'; });
+}
+</script>
 {% endblock %}

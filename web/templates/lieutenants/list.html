@@ -1,9 +1,71 @@
 {% extends "base.html" %}
-{% block title %}Lieutenants — {{ empire_name }}{% endblock %}
+{% block title %}Agents — {{ empire_name }}{% endblock %}
+{% block extra_css %}
+<style>
+    .fleet-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .fleet-header h1 { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em; color: var(--green); }
+    .fleet-header p { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem; }
+
+    .fleet-filters { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .filter-chip { padding: 0.35rem 0.8rem; font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); cursor: pointer; background: var(--bg-card); transition: all 0.15s; user-select: none; }
+    .filter-chip:hover { color: var(--text); border-color: var(--border-glow); }
+    .filter-chip.active { color: var(--green); border-color: var(--green); background: var(--green-dim); }
+
+    .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+
+    .agent-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; transition: all 0.15s; position: relative; }
+    .agent-card:hover { border-color: rgba(52,211,153,0.3); transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    .agent-card.inactive { opacity: 0.6; }
+
+    .agent-top { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+    .agent-avatar { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-weight: 800; font-size: 1rem; text-transform: uppercase; flex-shrink: 0; }
+    .agent-avatar.domain-models { background: rgba(56,189,248,0.2); color: var(--blue); border: 1px solid var(--blue); }
+    .agent-avatar.domain-research { background: rgba(52,211,153,0.2); color: var(--green); border: 1px solid var(--green); }
+    .agent-avatar.domain-agents { background: rgba(167,139,250,0.2); color: var(--purple); border: 1px solid var(--purple); }
+    .agent-avatar.domain-tooling { background: rgba(251,191,36,0.2); color: var(--amber); border: 1px solid var(--amber); }
+    .agent-avatar.domain-industry { background: rgba(251,113,133,0.2); color: var(--rose); border: 1px solid var(--rose); }
+    .agent-avatar.domain-open_source { background: rgba(34,211,238,0.2); color: var(--cyan); border: 1px solid var(--cyan); }
+    .agent-avatar.domain-default { background: rgba(100,116,139,0.2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    .agent-name { font-family: var(--font-mono); font-size: 0.95rem; font-weight: 700; color: var(--text); text-transform: uppercase; letter-spacing: 0.05em; }
+    .agent-name a { color: var(--text); text-decoration: none; }
+    .agent-name a:hover { color: var(--green); text-decoration: none; }
+    .agent-meta { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.2rem; }
+    .agent-domain { font-family: var(--font-mono); font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+    .agent-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: agent-pulse 2s ease-in-out infinite; }
+    .agent-pulse.inactive { background: var(--text-muted); box-shadow: none; animation: none; }
+    @keyframes agent-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .agent-perf { margin-bottom: 0.9rem; }
+    .agent-perf-label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 0.3rem; }
+    .agent-perf-value { font-weight: 700; color: var(--text); }
+    .agent-perf .progress-bar { height: 8px; }
+
+    .agent-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; padding: 0.6rem 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 0.75rem; }
+    .agent-stat { text-align: center; }
+    .agent-stat-value { font-family: var(--font-mono); font-size: 0.95rem; font-weight: 700; color: var(--text); }
+    .agent-stat-label { font-family: var(--font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-top: 0.15rem; }
+
+    .agent-footer { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+    .agent-actions { display: flex; gap: 0.4rem; opacity: 0; transition: opacity 0.15s; }
+    .agent-card:hover .agent-actions { opacity: 1; }
+    .agent-action { padding: 0.25rem 0.6rem; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; border-radius: 3px; border: 1px solid var(--border); background: var(--bg-hover); color: var(--text-secondary); cursor: pointer; text-decoration: none; }
+    .agent-action:hover { border-color: var(--green); color: var(--green); text-decoration: none; }
+
+    .fleet-empty { text-align: center; padding: 3rem; color: var(--text-muted); }
+</style>
+{% endblock %}
 {% block content %}
-<div class="page-header">
-    <h1>Lieutenant Fleet</h1>
-    <p>{{ lieutenants|length }} lieutenants registered</p>
+<div class="fleet-header">
+    <div>
+        <h1>Agent Fleet</h1>
+        <p>{{ lieutenants|length }} lieutenants registered</p>
+    </div>
+    {% if fleet_stats %}
+    <div class="mono text-muted" style="font-size: 0.75rem;">
+        Avg performance: <span class="text-green">{{ "%.0f"|format(fleet_stats.get('avg_performance', 0) * 100) }}%</span>
+    </div>
+    {% endif %}
 </div>
 
 {% if fleet_stats %}
@@ -17,7 +79,7 @@
         <div class="stat-label">Active</div>
     </div>
     <div class="card stat">
-        <div class="stat-value">{{ "%.2f"|format(fleet_stats.get('avg_performance', 0)) }}</div>
+        <div class="stat-value">{{ "%.0f"|format(fleet_stats.get('avg_performance', 0) * 100) }}%</div>
         <div class="stat-label">Avg Performance</div>
     </div>
     <div class="card stat">
@@ -27,29 +89,120 @@
 </div>
 {% endif %}
 
-<div class="card">
-    <table>
-        <thead>
-            <tr><th>Name</th><th>Domain</th><th>Status</th><th>Performance</th><th>Tasks</th><th>Cost</th><th>Last Active</th></tr>
-        </thead>
-        <tbody>
-        {% for lt in lieutenants %}
-        <tr>
-            <td><a href="/lieutenants/{{ lt.id }}">{{ lt.name }}</a></td>
-            <td><span class="badge badge-purple">{{ lt.domain }}</span></td>
-            <td><span class="badge {% if lt.status == 'active' %}badge-green{% else %}badge-amber{% endif %}">{{ lt.status }}</span></td>
-            <td>
-                <div class="progress-bar" style="width: 60px; display: inline-block; vertical-align: middle;">
-                    <div class="progress-bar-fill" style="width: {{ (lt.performance_score * 100)|int }}%; background: var(--green);"></div>
-                </div>
-                {{ "%.2f"|format(lt.performance_score) }}
-            </td>
-            <td>{{ lt.tasks_completed }} <span class="text-muted">/ {{ lt.tasks_completed + lt.tasks_failed }}</span></td>
-            <td class="mono">${{ "%.4f"|format(lt.total_cost) }}</td>
-            <td class="text-muted">{{ lt.last_active or 'Never' }}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
+<div class="fleet-filters">
+    <div class="filter-chip active" data-filter="all">All</div>
+    <div class="filter-chip" data-filter="active">Active</div>
+    <div class="filter-chip" data-filter="inactive">Inactive</div>
+    <span style="flex: 1;"></span>
+    <div class="filter-chip" data-domain="all">All Domains</div>
+    <div class="filter-chip" data-domain="models">Models</div>
+    <div class="filter-chip" data-domain="research">Research</div>
+    <div class="filter-chip" data-domain="agents">Agents</div>
+    <div class="filter-chip" data-domain="tooling">Tooling</div>
+    <div class="filter-chip" data-domain="industry">Industry</div>
+    <div class="filter-chip" data-domain="open_source">Open Source</div>
 </div>
+
+<div class="agent-grid" id="agent-grid">
+    {% for lt in lieutenants %}
+    {% set domain_class = 'domain-' + lt.domain if lt.domain in ['models','research','agents','tooling','industry','open_source'] else 'domain-default' %}
+    <div class="agent-card {% if lt.status != 'active' %}inactive{% endif %}" data-status="{{ lt.status }}" data-domain="{{ lt.domain }}">
+        <div class="agent-top">
+            <div class="agent-avatar {{ domain_class }}">{{ lt.name[0] }}</div>
+            <div style="flex: 1; min-width: 0;">
+                <div class="agent-name"><a href="/lieutenants/{{ lt.id }}">{{ lt.name }}</a></div>
+                <div class="agent-meta">
+                    <span class="agent-pulse {% if lt.status != 'active' %}inactive{% endif %}"></span>
+                    <span class="agent-domain">{{ lt.domain }}</span>
+                    <span class="text-muted" style="font-size: 0.6rem;">•</span>
+                    <span class="agent-domain" style="color: {% if lt.status == 'active' %}var(--green){% else %}var(--text-muted){% endif %};">{{ lt.status }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="agent-perf">
+            <div class="agent-perf-label">
+                <span>Performance</span>
+                <span class="agent-perf-value">{{ "%.0f"|format(lt.performance_score * 100) }}%</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-bar-fill" style="width: {{ (lt.performance_score * 100)|int }}%; background: {% if lt.performance_score >= 0.8 %}var(--green){% elif lt.performance_score >= 0.6 %}var(--amber){% else %}var(--rose){% endif %};"></div>
+            </div>
+        </div>
+
+        <div class="agent-stats">
+            <div class="agent-stat">
+                <div class="agent-stat-value text-green">{{ lt.tasks_completed }}</div>
+                <div class="agent-stat-label">Complete</div>
+            </div>
+            <div class="agent-stat">
+                <div class="agent-stat-value {% if lt.tasks_failed > 0 %}text-rose{% endif %}">{{ lt.tasks_failed }}</div>
+                <div class="agent-stat-label">Failed</div>
+            </div>
+            <div class="agent-stat">
+                <div class="agent-stat-value mono">${{ "%.2f"|format(lt.total_cost) }}</div>
+                <div class="agent-stat-label">Cost</div>
+            </div>
+        </div>
+
+        <div class="agent-footer">
+            <span>{{ (lt.last_active or 'Never')[:16] if lt.last_active else 'Never' }}</span>
+            <div class="agent-actions">
+                <a href="/lieutenants/{{ lt.id }}" class="agent-action">View</a>
+                <button class="agent-action" onclick="toggleAgent('{{ lt.id }}', '{{ lt.status }}', event)">{% if lt.status == 'active' %}Deactivate{% else %}Activate{% endif %}</button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    {% if not lieutenants %}
+    <div class="fleet-empty" style="grid-column: 1/-1;">
+        <h3 class="mono" style="text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">No Agents</h3>
+        <p>No lieutenants registered.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var statusFilter = 'all';
+var domainFilter = 'all';
+
+function applyFilters() {
+    document.querySelectorAll('.agent-card').forEach(function(card) {
+        var s = card.dataset.status;
+        var d = card.dataset.domain;
+        var sOk = statusFilter === 'all' || s === statusFilter;
+        var dOk = domainFilter === 'all' || d === domainFilter;
+        card.style.display = (sOk && dOk) ? '' : 'none';
+    });
+}
+
+document.querySelectorAll('.filter-chip[data-filter]').forEach(function(el) {
+    el.addEventListener('click', function() {
+        document.querySelectorAll('.filter-chip[data-filter]').forEach(function(c) { c.classList.remove('active'); });
+        el.classList.add('active');
+        statusFilter = el.dataset.filter;
+        applyFilters();
+    });
+});
+document.querySelectorAll('.filter-chip[data-domain]').forEach(function(el) {
+    el.addEventListener('click', function() {
+        document.querySelectorAll('.filter-chip[data-domain]').forEach(function(c) { c.classList.remove('active'); });
+        el.classList.add('active');
+        domainFilter = el.dataset.domain;
+        applyFilters();
+    });
+});
+// default active domain chip
+document.querySelector('.filter-chip[data-domain="all"]').classList.add('active');
+
+function toggleAgent(id, currentStatus, ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    var action = currentStatus === 'active' ? 'deactivate' : 'activate';
+    fetch('/lieutenants/' + id + '/' + action, {method: 'POST'})
+        .then(function(r) { if (r.ok) location.reload(); });
+}
+</script>
 {% endblock %}

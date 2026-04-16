@@ -10,34 +10,63 @@
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
             --bg: #0b0f19; --bg-card: #111827; --bg-hover: #1a2332;
+            --bg-dark: #080c14;
             --border: #1e293b; --border-glow: #334155;
             --text: #e2e8f0; --text-secondary: #94a3b8; --text-muted: #64748b;
             --blue: #38bdf8; --green: #34d399; --amber: #fbbf24;
             --rose: #fb7185; --purple: #a78bfa; --cyan: #22d3ee;
+            --green-dim: rgba(52,211,153,0.1);
+            --font-mono: 'JetBrains Mono', monospace;
         }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
         a { color: var(--blue); text-decoration: none; }
         a:hover { text-decoration: underline; }
 
-        .layout { display: flex; min-height: 100vh; }
-        .sidebar { width: 240px; background: var(--bg-card); border-right: 1px solid var(--border); padding: 1.5rem 0; position: fixed; height: 100vh; overflow-y: auto; }
-        .sidebar-brand { padding: 0 1.25rem 1.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
-        .sidebar-brand h1 { font-size: 1.1rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--amber); }
-        .sidebar-brand p { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; }
+        /* === TOP NAVIGATION === */
+        .top-nav { position: fixed; top: 0; left: 0; right: 0; height: 52px; background: var(--bg-dark); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 1.5rem; z-index: 100; }
+        .top-nav-brand { font-family: var(--font-mono); font-size: 1rem; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; color: var(--amber); margin-right: 1.75rem; text-decoration: none; flex-shrink: 0; }
+        .top-nav-brand:hover { text-decoration: none; color: var(--amber); }
+        .top-nav-brand span { font-size: 0.65rem; font-weight: 400; color: var(--text-muted); letter-spacing: 0.05em; margin-left: 0.75rem; text-transform: none; }
+        .top-nav-links { display: flex; gap: 0; flex: 1; overflow-x: auto; }
+        .top-nav-link { padding: 0.9rem 0.9rem; font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s; white-space: nowrap; text-decoration: none; }
+        .top-nav-link:hover { color: var(--text); background: var(--bg-hover); text-decoration: none; }
+        .top-nav-link.active { color: var(--green); border-bottom-color: var(--green); }
 
-        .nav-section { margin-bottom: 1rem; }
-        .nav-section-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); padding: 0 1.25rem; margin-bottom: 0.5rem; }
-        .nav-link { display: block; padding: 0.5rem 1.25rem; font-size: 0.85rem; color: var(--text-secondary); transition: all 0.15s; }
-        .nav-link:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
-        .nav-link.active { color: var(--cyan); border-right: 2px solid var(--cyan); }
+        /* Nav dropdown (System) */
+        .top-nav-dropdown { position: relative; }
+        .top-nav-dropdown-menu { position: absolute; top: 100%; right: 0; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; min-width: 160px; padding: 0.3rem 0; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.4); z-index: 200; }
+        .top-nav-dropdown:hover .top-nav-dropdown-menu { display: block; }
+        .top-nav-dropdown-menu a { display: block; padding: 0.5rem 0.9rem; font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); text-decoration: none; transition: all 0.1s; }
+        .top-nav-dropdown-menu a:hover { color: var(--text); background: var(--bg-hover); text-decoration: none; }
 
-        .main { margin-left: 240px; flex: 1; padding: 2rem; max-width: 1200px; }
+        .top-nav-right { margin-left: auto; display: flex; align-items: center; gap: 0.85rem; flex-shrink: 0; padding-left: 1rem; }
+
+        /* Status strip */
+        .nav-status { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
+        .nav-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: status-pulse 2s ease-in-out infinite; }
+        .nav-status-dot.degraded { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+        .nav-status-dot.error { background: var(--rose); box-shadow: 0 0 6px var(--rose); }
+        @keyframes status-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .nav-clock { color: var(--green); font-weight: 600; letter-spacing: 0.05em; }
+        .nav-date { color: var(--text-muted); font-size: 0.68rem; }
+
+        .btn-warroom { display: inline-block; background: var(--green); color: #0b0f19; font-family: var(--font-mono); font-weight: 700; font-size: 0.72rem; padding: 0.45rem 1.1rem; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.06em; border: none; cursor: pointer; text-decoration: none; transition: all 0.15s; }
+        .btn-warroom:hover { text-decoration: none; opacity: 0.9; box-shadow: 0 0 12px rgba(52,211,153,0.3); }
+        .btn-warroom.active { box-shadow: 0 0 12px rgba(52,211,153,0.4); }
+
+        /* === LAYOUT === */
+        .layout { display: flex; flex-direction: column; min-height: 100vh; }
+        .main { margin-top: 52px; flex: 1; padding: 2rem; max-width: 1400px; width: 100%; margin-left: auto; margin-right: auto; }
+
+        /* War room page override */
+        .warroom-page .main { padding: 0; max-width: none; }
+
         .page-header { margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
-        .page-header h1 { font-size: 1.5rem; font-weight: 700; }
+        .page-header h1 { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
         .page-header p { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.25rem; }
 
         .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
-        .card:hover { border-color: var(--border-glow); }
+        .card:hover { border-color: rgba(52,211,153,0.25); }
         .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem; }
         .card h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-secondary); }
 
@@ -58,7 +87,7 @@
         .badge-purple { background: rgba(167,139,250,0.15); color: var(--purple); }
 
         table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 0.75rem; border-bottom: 1px solid var(--border); }
+        th { text-align: left; font-family: var(--font-mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); padding: 0.75rem; border-bottom: 1px solid var(--border); }
         td { padding: 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
         tr:hover td { background: var(--bg-hover); }
 
@@ -66,8 +95,10 @@
         .btn:hover { background: var(--bg-hover); border-color: var(--border-glow); }
         .btn-primary { background: rgba(56,189,248,0.15); border-color: var(--blue); color: var(--blue); }
         .btn-primary:hover { background: rgba(56,189,248,0.25); }
+        .btn-action { background: var(--green); color: #0b0f19; border: none; font-weight: 700; font-family: var(--font-mono); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .btn-action:hover { opacity: 0.9; box-shadow: 0 0 8px rgba(52,211,153,0.3); }
 
-        .mono { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+        .mono { font-family: var(--font-mono); font-size: 0.85rem; }
         .text-green { color: var(--green); }
         .text-amber { color: var(--amber); }
         .text-rose { color: var(--rose); }
@@ -81,53 +112,48 @@
         .alert-error { background: rgba(251,113,133,0.1); border: 1px solid rgba(251,113,133,0.3); color: var(--rose); }
 
         @media (max-width: 768px) {
-            .sidebar { display: none; }
-            .main { margin-left: 0; padding: 1rem; }
+            .top-nav { padding: 0 0.75rem; }
+            .top-nav-links { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .top-nav-brand span { display: none; }
+            .main { padding: 1rem; margin-top: 52px; }
             .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
         }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
     <div class="layout">
-        <nav class="sidebar">
-            <div class="sidebar-brand">
-                <h1>{{ empire_name }}</h1>
-                <p>Autonomous AI System</p>
+        <nav class="top-nav">
+            <a href="/" class="top-nav-brand">{{ empire_name }}<span>Autonomous AI</span></a>
+            <div class="top-nav-links">
+                <a href="/god" class="top-nav-link" data-path="/god">Command</a>
+                <a href="/lieutenants" class="top-nav-link" data-path="/lieutenants">Agents</a>
+                <a href="/directives" class="top-nav-link" data-path="/directives">Research</a>
+                <a href="/" class="top-nav-link" data-path="/">Dashboard</a>
+                <a href="/knowledge" class="top-nav-link" data-path="/knowledge">Knowledge</a>
+                <a href="/memory" class="top-nav-link" data-path="/memory">Memory</a>
+                <div class="top-nav-dropdown">
+                    <a href="/settings" class="top-nav-link" data-path="/settings">System ▾</a>
+                    <div class="top-nav-dropdown-menu">
+                        <a href="/settings">Settings</a>
+                        <a href="/budget">Budget</a>
+                        <a href="/scheduler">Scheduler</a>
+                        <a href="/evolution">Evolution</a>
+                        <a href="/network">Network</a>
+                        <a href="/settings/health">Health</a>
+                    </div>
+                </div>
             </div>
-            <div class="nav-section">
-                <div class="nav-section-title">Overview</div>
-                <a href="/" class="nav-link">Dashboard</a>
-            </div>
-            <div class="nav-section">
-                <div class="nav-section-title">Operations</div>
-                <a href="/lieutenants" class="nav-link">Lieutenants</a>
-                <a href="/directives" class="nav-link">Directives</a>
-                <a href="/warrooms" class="nav-link">War Rooms</a>
-            </div>
-            <div class="nav-section">
-                <div class="nav-section-title">Intelligence</div>
-                <a href="/knowledge" class="nav-link">Knowledge Graph</a>
-                <a href="/memory" class="nav-link">Memory</a>
-                <a href="/evolution" class="nav-link">Evolution</a>
-            </div>
-            <div class="nav-section">
-                <div class="nav-section-title">Research</div>
-                <a href="/budget" class="nav-link">Budget</a>
-                <a href="/scheduler" class="nav-link">Scheduler</a>
-                <a href="/network" class="nav-link">Network</a>
-            </div>
-            <div class="nav-section">
-                <div class="nav-section-title">Command</div>
-                <a href="/god" class="nav-link" style="color: var(--amber); font-weight: 600;">God Panel</a>
-            </div>
-            <div class="nav-section">
-                <div class="nav-section-title">System</div>
-                <a href="/settings" class="nav-link">Settings</a>
-                <a href="/settings/health" class="nav-link">Health</a>
+            <div class="top-nav-right">
+                <div class="nav-status">
+                    <span class="nav-status-dot" id="nav-status-dot" title="System healthy"></span>
+                    <span class="nav-clock" id="nav-clock">--:--:--</span>
+                    <span class="nav-date" id="nav-date">----/--/--</span>
+                </div>
                 {% if auth_enabled %}
-                <a href="/logout" class="nav-link" style="color: var(--rose); margin-top: 1rem;">Logout</a>
+                <a href="/logout" class="top-nav-link" style="color: var(--rose);">Logout</a>
                 {% endif %}
+                <a href="/warrooms" class="btn-warroom" data-path="/warrooms">War Room</a>
             </div>
         </nav>
 
@@ -139,6 +165,47 @@
         </main>
     </div>
 
+    <script>
+    (function() {
+        var path = window.location.pathname;
+        document.querySelectorAll('.top-nav-link[data-path]').forEach(function(el) {
+            var dp = el.getAttribute('data-path');
+            if (dp === '/' ? path === '/' : path.startsWith(dp)) el.classList.add('active');
+        });
+        var wr = document.querySelector('.btn-warroom');
+        if (wr && path.startsWith('/warrooms')) wr.classList.add('active');
+    })();
+
+    // Live clock + date
+    (function() {
+        var clockEl = document.getElementById('nav-clock');
+        var dateEl = document.getElementById('nav-date');
+        function pad(n) { return n < 10 ? '0' + n : n; }
+        function tick() {
+            var d = new Date();
+            if (clockEl) clockEl.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+            if (dateEl) dateEl.textContent = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+        }
+        tick();
+        setInterval(tick, 1000);
+    })();
+
+    // Health ping every 30s
+    (function() {
+        var dot = document.getElementById('nav-status-dot');
+        if (!dot) return;
+        function ping() {
+            fetch('/ping', {cache: 'no-store'})
+                .then(function(r) {
+                    dot.classList.remove('degraded', 'error');
+                    if (!r.ok) dot.classList.add('degraded');
+                })
+                .catch(function() { dot.classList.remove('degraded'); dot.classList.add('error'); });
+        }
+        ping();
+        setInterval(ping, 30000);
+    })();
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>
